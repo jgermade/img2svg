@@ -35,6 +35,20 @@
       </section>
 
       <div id="workspace" class="workspace" hidden>
+        <section class="preview">
+          <div class="panes">
+            <figure>
+              <figcaption>Original <span id="originalMeta"></span></figcaption>
+              <div class="canvas-box checker"><canvas id="original"></canvas></div>
+            </figure>
+            <figure>
+              <figcaption>SVG <span id="svgMeta"></span></figcaption>
+              <div class="canvas-box checker" id="result"></div>
+            </figure>
+          </div>
+          <p class="stats" id="stats"></p>
+        </section>
+        
         <aside class="controls">
           <label class="field">
             <span>Escala de la rejilla</span>
@@ -113,20 +127,6 @@
             <button id="reset" type="button">Otra imagen</button>
           </div>
         </aside>
-
-        <section class="preview">
-          <div class="panes">
-            <figure>
-              <figcaption>Original <span id="originalMeta"></span></figcaption>
-              <div class="canvas-box checker"><canvas id="original"></canvas></div>
-            </figure>
-            <figure>
-              <figcaption>SVG <span id="svgMeta"></span></figcaption>
-              <div class="canvas-box checker" id="result"></div>
-            </figure>
-          </div>
-          <p class="stats" id="stats"></p>
-        </section>
       </div>
 
       <p class="error" id="error" hidden></p>
