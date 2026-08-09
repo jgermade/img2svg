@@ -29,6 +29,11 @@ pub struct HalfEdge {
     /// Polilínea densa, sin simplificar: el ajuste necesita todos los puntos
     /// para estimar tangentes, y el ajustador `pixel` ya se encarga de colapsar
     /// los tramos rectos.
+    ///
+    /// Incluye **los dos extremos**, y un tramo cerrado repite el primero al
+    /// final. Esa repetición es la señal de que el tramo se cierra sobre sí
+    /// mismo, que es justo lo que un ajustador de curvas necesita saber para
+    /// tratarlo como periódico en vez de dejarle dos puntas sueltas.
     pub points: Vec<Point>,
     pub left: RegionId,
     /// La región del otro lado, o `None` si al otro lado está el exterior.
@@ -84,6 +89,12 @@ impl Regions {
                 it.next();
             }
             out.extend(it.copied());
+        }
+        // Y el último punto del anillo es otra vez el primero, porque el tramo
+        // que lo cierra acaba donde empezó el primero. Se descarta aquí, en un
+        // solo sitio, en vez de que cada ajustador tenga que acordarse.
+        if out.len() > 1 && out.last() == out.first() {
+            out.pop();
         }
         out
     }

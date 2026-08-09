@@ -21,6 +21,8 @@
 //! ```
 
 pub mod background;
+#[cfg(feature = "photo")]
+pub mod boundary;
 pub mod checker;
 #[cfg(feature = "photo")]
 pub mod cluster;

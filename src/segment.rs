@@ -78,7 +78,12 @@ pub fn from_pixel_map(map: &PixelMap, grouping: Grouping) -> Regions {
             let id = regions.len();
             let rings = loops
                 .into_iter()
-                .map(|points| {
+                .map(|mut points| {
+                    // `trace` devuelve el bucle sin repetir el punto de partida;
+                    // el tramo sí lo repite, que es como se distingue un tramo
+                    // cerrado de uno con dos puntas. `ring_points` lo descarta
+                    // otra vez, así que el dibujo no cambia.
+                    points.push(points[0]);
                     edges.push(HalfEdge {
                         points,
                         left: id,

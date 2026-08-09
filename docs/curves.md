@@ -89,18 +89,41 @@ along a band boundary alternate between two distant representatives and shatter
 into fragments. Fewer colours is not fewer regions. The speck filter is the
 load-bearing part, not the threshold.
 
+**Boundary extraction** (`boundary.rs`). Turns the labelled image into the
+half-edge IR, with **every boundary extracted once** and both its regions
+recorded — which is the whole point, since a shared border fitted twice is what
+opens a hairline between two curved regions.
+
+It works on the lattice of pixel corners. Each unit segment between two adjacent
+corners — a *crack* — separates two pixels, and is a boundary when their labels
+differ; the outside and transparency count as one more label, so the image border
+falls out for free. Corners where three or four regions meet are *nodes*, and a
+chain of cracks between two nodes is exactly one half-edge.
+
+What makes that work is a small lemma: at a corner with exactly two boundary
+cracks, both separate the *same* pair of regions, whether the boundary runs
+straight through or turns. So a chain has one well-defined `(left, right)` along
+its whole length, which is what lets it be fitted once for both faces. A
+`debug_assert` re-checks it crack by crack rather than trusting the argument — it
+has now held across roughly 285,000 chains of a noisy 1.4 Mpx image.
+
+Measured end to end on the 4.2 Mpx corpus image: 340 ms clustering, 112 ms
+boundaries, 30 ms to write the SVG.
+
 ## What is missing
 
 **Speck filtering and gradient banding.** Any region under N pixels should merge
-into its largest neighbour, which needs the `right` side of each half-edge to know
-which neighbour that is. And a vector format has no cheap per-region gradient, so
-a smooth ramp has to become discrete bands on purpose.
+into its largest neighbour — `right` is now populated, so the neighbour is there
+to be found. And a vector format has no cheap per-region gradient, so a smooth
+ramp has to become discrete bands on purpose.
 
-**Boundary extraction for the photo path.** `cluster.rs` produces a labelled
-image; turning that into the half-edge IR is its own step. The grid path's
-`trace` cannot be reused as is — it rebuilds a whole-image mask per region, which
-is fine for 40 colours on a small grid and hopeless for tens of thousands of
-regions.
+One prediction in the plan turns out not to hold, and it is worth correcting
+rather than repeating: unfiltered specks were supposed to make the SVG *bigger
+than the PNG*. Measured, it comes out at 0.2–0.6× the PNG — but only because
+these particular PNGs are pathologically noisy pixel art with 64k–159k distinct
+colours, so they compress badly. The case for the speck filter stands on path
+count, not on file size: 18,317 paths in one document is unusable in an editor
+whatever it weighs.
 
 **Bézier fitting.** Simplifying each contour, detecting the corners so they stay
 sharp, and least-squares fitting curves to the rest.
