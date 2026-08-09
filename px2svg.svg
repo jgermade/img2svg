@@ -1,0 +1,67 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'>
+  <defs>
+    <linearGradient id='px' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0%' stop-color='#7fb0ff'/>
+      <stop offset='100%' stop-color='#3d6fe0'/>
+    </linearGradient>
+    <radialGradient id='bg' cx='50%' cy='40%' r='75%'>
+      <stop offset='0%' stop-color='#14161d'/>
+      <stop offset='100%' stop-color='#0b0c10'/>
+    </radialGradient>
+  </defs>
+
+  <rect width='8' height='8' fill='url(#bg)'/>
+
+  <!-- pixeles, cada uno separado con hueco entre celdas -->
+  <g fill='url(#px)'>
+    <rect x='1.08' y='1.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='2.08' y='1.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='3.08' y='1.08' width='0.84' height='0.84' rx='0.12'/>
+
+    <rect x='1.08' y='2.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='2.08' y='2.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='3.08' y='2.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='4.08' y='2.08' width='0.84' height='0.84' rx='0.12'/>
+
+    <rect x='1.08' y='3.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='2.08' y='3.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='3.08' y='3.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='4.08' y='3.08' width='0.84' height='0.84' rx='0.12'/>
+
+    <rect x='1.08' y='4.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='2.08' y='4.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='3.08' y='4.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='4.08' y='4.08' width='0.84' height='0.84' rx='0.12'/>
+
+    <rect x='1.08' y='5.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='2.08' y='5.08' width='0.84' height='0.84' rx='0.12'/>
+    <rect x='3.08' y='5.08' width='0.84' height='0.84' rx='0.12'/>
+
+    <rect x='1.08' y='6.08' width='0.84' height='0.84' rx='0.12'/>
+  </g>
+
+  <!-- highlight sutil en la fila superior para dar volumen -->
+  <g fill='#ffffff' opacity='0.15'>
+    <rect x='1.08' y='1.08' width='0.84' height='0.2' rx='0.1'/>
+    <rect x='2.08' y='1.08' width='0.84' height='0.2' rx='0.1'/>
+    <rect x='3.08' y='1.08' width='0.84' height='0.2' rx='0.1'/>
+  </g>
+
+  <!-- anclas y manejadores sobre el contorno de la figura de pixeles -->
+  <g>
+    <!-- contorno como referencia (fino, casi invisible) -->
+    <path d='M1 1h3v1h1v3h-1v1h-2v1h-1z' fill='none' stroke='#cfe0ff' stroke-width='0.045' opacity='0.85'/>
+
+    <!-- anclas en cada vertice del contorno (rellenas, sin stroke) -->
+    <circle cx='1' cy='1' r='0.06' fill='#cfe0ff'/>
+    <circle cx='4' cy='1' r='0.06' fill='#cfe0ff'/>
+    <circle cx='4' cy='2' r='0.06' fill='#cfe0ff'/>
+    <circle cx='5' cy='2' r='0.06' fill='#cfe0ff'/>
+    <circle cx='5' cy='5' r='0.06' fill='#cfe0ff'/>
+    <circle cx='4' cy='5' r='0.06' fill='#cfe0ff'/>
+    <circle cx='4' cy='6' r='0.06' fill='#cfe0ff'/>
+    <circle cx='2' cy='6' r='0.06' fill='#cfe0ff'/>
+    <circle cx='2' cy='7' r='0.06' fill='#cfe0ff'/>
+    <circle cx='1' cy='7' r='0.06' fill='none' stroke='#cfe0ff' stroke-width='0.04'/>
+  </g>
+</svg>

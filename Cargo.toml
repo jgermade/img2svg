@@ -1,0 +1,44 @@
+[package]
+name = "px2svg"
+version = "0.1.0"
+edition = "2021"
+description = "Convierte imágenes pixel art en SVG uniendo los píxeles en paths"
+repository = "https://github.com/jgermade/px2svg"
+autoexamples = false
+
+[lib]
+name = "px2svg"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "px2svg"
+path = "src/cli.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:clap", "formats"]
+# Decodificadores de imagen. La build web no los necesita: decodifica el
+# navegador y le pasa el RGBA crudo, lo que ahorra medio mega de wasm.
+formats = ["image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp"]
+wasm = ["dep:wasm-bindgen", "dep:js-sys"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"], optional = true }
+image = { version = "0.25", default-features = false }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[profile.release]
+opt-level = 3
+
+# El binario web se optimiza para tamaño: descargarlo rápido importa más que
+# convertir en 20 ms en vez de 30.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

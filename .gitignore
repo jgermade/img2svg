@@ -1,0 +1,15 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+/.claude
+/examples
+
+# Generados al publicar la web: wasm-pack compila el paquete y el workflow
+# copia ahí el logotipo.
+/docs/pkg/
+/docs/px2svg.svg
+
+# macOS
+.DS_Store
