@@ -21,9 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      # Sin acción de toolchain a propósito: la versión y los targets salen de
+      # `rust-toolchain.toml`, que rustup instala solo al leerlo. Fijarlos aquí
+      # además del fichero es la forma segura de que acaben sin coincidir.
+      - name: Toolchain
+        run: rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@v2
 
@@ -41,11 +43,11 @@ jobs:
       - name: Compilar a WebAssembly
         run: >
           wasm-pack build --release --target web
-          --out-dir docs/pkg --out-name px2svg
+          --out-dir docs/pkg --out-name img2svg
           -- --no-default-features --features wasm
 
       - name: Copiar el logotipo
-        run: cp px2svg.svg docs/
+        run: cp img2svg.svg docs/
 
       - uses: actions/configure-pages@v6
 

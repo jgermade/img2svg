@@ -9,7 +9,7 @@
 # Generados al publicar la web: wasm-pack compila el paquete y el workflow
 # copia ahí el logotipo.
 /docs/pkg/
-/docs/px2svg.svg
+/docs/img2svg.svg
 
 # Volcado de una instantánea que no cuadra, para poder hacerle un diff.
 /tests/golden/*.actual

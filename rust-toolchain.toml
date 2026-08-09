@@ -1,0 +1,13 @@
+# Única fuente de verdad de la versión de Rust: rustup la lee y la instala sola,
+# tanto en local como en CI, así que las dos usan exactamente lo mismo.
+#
+# Se fija una versión concreta y no `stable`: con `stable` bastaría que saliera
+# una release entre una compilación local y la de CI para que dejaran de
+# coincidir, que es justo lo que se quiere evitar.
+#
+# Para subirla: cambia `channel`, ejecuta `cargo test` y `wasm-pack build`, y
+# commitea el cambio junto con lo que haya que ajustar.
+[toolchain]
+channel = "1.93.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

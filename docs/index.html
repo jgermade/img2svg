@@ -3,23 +3,47 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>px2svg · pixel art a SVG</title>
+    <title>img2svg · imágenes a SVG</title>
     <meta
       name="description"
-      content="Convierte pixel art en SVG uniendo los píxeles del mismo color en paths. Todo se ejecuta en tu navegador."
+      content="Convierte imágenes en SVG. Modo pixel art: detecta la rejilla y une los píxeles del mismo color en paths. Todo se ejecuta en tu navegador."
     />
     <link rel="stylesheet" href="./style.css" />
-    <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCA4IDgnPgogICAgPHJlY3Qgd2lkdGg9JzgnIGhlaWdodD0nOCcgZmlsbD0nIzBiMGMxMCcvPgogICAgPHBhdGggZmlsbD0nIzRmOGNmZicgZD0nTTEgMWgzdjFoMXYzaC0xdjFoLTJ2MWgtMXonLz4KPC9zdmc+" type="image/svg+xml" />
+    <link rel="icon" href="./img2svg.svg" type="image/svg+xml" />
   </head>
   <body>
     <header class="top">
-      <h1><img class="logo" src="./px2svg.svg" alt="" /> px2svg</h1>
+      <h1><img class="logo" src="./img2svg.svg" alt="" /> img2svg</h1>
       <p>
-        Pixel art a SVG: los píxeles del mismo color se unen en un solo
-        <code>&lt;path&gt;</code>. Se ejecuta entero en tu navegador, la imagen
-        no sale de tu equipo.
+        Imágenes a SVG, entero en tu navegador: la imagen no sale de tu equipo.
       </p>
-      <a class="repo" href="https://github.com/jgermade/px2svg">Código en GitHub</a>
+
+      <nav class="tabs" role="tablist" aria-label="Modo de conversión">
+        <button
+          id="tab-pixelart"
+          class="tab"
+          role="tab"
+          type="button"
+          aria-selected="true"
+          aria-controls="panel-pixelart"
+          data-mode="pixelart"
+        >
+          <span class="tab-name">Pixel art</span>
+          <span class="tab-hint">rejilla y píxeles cuadrados</span>
+        </button>
+        <button
+          id="tab-curves"
+          class="tab"
+          role="tab"
+          type="button"
+          aria-selected="false"
+          aria-controls="panel-curves"
+          data-mode="curves"
+        >
+          <span class="tab-name">Curvas</span>
+          <span class="tab-hint">fotos y dibujo suave</span>
+        </button>
+      </nav>
     </header>
 
     <main>
@@ -29,8 +53,12 @@
             d="M12 16V4m0 0L8 8m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
           />
         </svg>
-        <p class="drop-title">Arrastra una imagen, pega con <kbd>Ctrl</kbd>+<kbd>V</kbd> o haz clic</p>
-        <p class="drop-hint">PNG, JPEG, GIF, WebP, AVIF… lo que decodifique el navegador</p>
+        <p class="drop-title">
+          Arrastra una imagen, pega con <kbd>Ctrl</kbd>+<kbd>V</kbd> o haz clic
+        </p>
+        <p class="drop-hint">
+          PNG, JPEG, GIF, WebP, AVIF… lo que decodifique el navegador
+        </p>
         <input id="file" type="file" accept="image/*" hidden />
       </section>
 
@@ -39,17 +67,41 @@
           <div class="panes">
             <figure>
               <figcaption>Original <span id="originalMeta"></span></figcaption>
-              <div class="canvas-box checker"><canvas id="original"></canvas></div>
+              <div class="canvas-box checker" id="originalBox">
+                <canvas id="original" hidden></canvas>
+                <div class="skeleton" id="originalSkeleton" aria-hidden="true"></div>
+              </div>
             </figure>
             <figure>
               <figcaption>SVG <span id="svgMeta"></span></figcaption>
-              <div class="canvas-box checker" id="result"></div>
+              <div class="canvas-box checker" id="resultBox">
+                <div class="result-svg" id="result"></div>
+                <div class="skeleton" id="resultSkeleton" aria-hidden="true"></div>
+              </div>
             </figure>
           </div>
+
+          <div
+            class="progress"
+            id="progress"
+            role="progressbar"
+            aria-label="Progreso de la conversión"
+            hidden
+          >
+            <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+            <p class="progress-label" id="progressLabel"></p>
+          </div>
+
           <p class="stats" id="stats"></p>
         </section>
-        
-        <aside class="controls">
+
+        <!-- ------------------------------------------------ pixel art --- -->
+        <aside
+          class="controls"
+          id="panel-pixelart"
+          role="tabpanel"
+          aria-labelledby="tab-pixelart"
+        >
           <label class="field">
             <span>Escala de la rejilla</span>
             <div class="row">
@@ -67,64 +119,112 @@
           </label>
 
           <label class="field">
-            <span>Umbral de alfa <b id="alphaOut">128</b></span>
-            <input id="alpha" type="range" min="0" max="255" step="1" value="128" />
-            <small>Por debajo, el píxel se considera transparente.</small>
-          </label>
-
-          <label class="field">
-            <span>Tamaño de píxel</span>
-            <div class="row">
-              <input id="autoPixel" type="checkbox" checked />
-              <span class="row-label">tamaño original</span>
-            </div>
-            <input id="pixelSize" type="number" min="1" step="1" value="1" disabled />
-            <small>Unidades SVG por píxel del dibujo.</small>
-          </label>
-
-          <label class="field">
-            <span>Fondo</span>
-            <div class="row">
-              <input id="useBackground" type="checkbox" />
-              <input id="background" type="color" value="#ffffff" disabled />
-            </div>
-            <small>Sin marcar, el SVG queda con fondo transparente.</small>
-          </label>
-
-          <label class="field">
-            <span>Quitar el fondo</span>
-            <div class="row">
-              <input id="removeBackground" type="checkbox" />
-              <span class="row-label">y recortar al dibujo</span>
-            </div>
-            <small>Vacía el color liso que rodea al dibujo y ajusta el lienzo a
-            lo que queda. El mismo color encerrado dentro se conserva.</small>
-          </label>
-
-          <label class="field">
             <span>Quitar cuadrícula de transparencia</span>
             <div class="row">
               <input id="removeChecker" type="checkbox" checked />
               <span class="row-label">damero blanco/gris</span>
             </div>
-            <small>Devuelve a transparente el damero que se queda pegado al
-            capturar la pantalla de un editor.</small>
+            <small>
+              Devuelve a transparente el damero que se queda pegado al capturar
+              la pantalla de un editor.
+            </small>
           </label>
 
-          <label class="field">
-            <span>Un path por color</span>
-            <div class="row">
-              <input id="mergeColors" type="checkbox" />
-              <span class="row-label">en vez de por bloque</span>
-            </div>
-            <small>Ocupa menos, pero cada figura del SVG pasa a ser todo lo que
-            comparte color, esté donde esté.</small>
-          </label>
+          <details class="advanced">
+            <summary>Ajustes avanzados</summary>
+
+            <label class="field">
+              <span>Umbral de alfa <b id="alphaOut">128</b></span>
+              <input id="alpha" type="range" min="0" max="255" step="1" value="128" />
+              <small>Por debajo, el píxel se considera transparente.</small>
+            </label>
+
+            <label class="field">
+              <span>Tamaño de píxel</span>
+              <div class="row">
+                <input id="autoPixel" type="checkbox" checked />
+                <span class="row-label">tamaño original</span>
+              </div>
+              <input id="pixelSize" type="number" min="1" step="1" value="1" disabled />
+              <small>Unidades SVG por píxel del dibujo.</small>
+            </label>
+
+            <label class="field">
+              <span>Fondo</span>
+              <div class="row">
+                <input id="useBackground" type="checkbox" />
+                <input id="background" type="color" value="#ffffff" disabled />
+              </div>
+              <small>Sin marcar, el SVG queda con fondo transparente.</small>
+            </label>
+
+            <label class="field">
+              <span>Quitar el fondo</span>
+              <div class="row">
+                <input id="removeBackground" type="checkbox" />
+                <span class="row-label">y recortar al dibujo</span>
+              </div>
+              <small>
+                Vacía el color liso que rodea al dibujo y ajusta el lienzo a lo
+                que queda. El mismo color encerrado dentro se conserva.
+              </small>
+            </label>
+
+            <label class="field">
+              <span>Un path por color</span>
+              <div class="row">
+                <input id="mergeColors" type="checkbox" />
+                <span class="row-label">en vez de por bloque</span>
+              </div>
+              <small>
+                Ocupa menos, pero cada figura del SVG pasa a ser todo lo que
+                comparte color, esté donde esté.
+              </small>
+            </label>
+          </details>
 
           <div class="actions">
             <button id="download" type="button" class="primary">Descargar SVG</button>
             <button id="copy" type="button">Copiar</button>
             <button id="reset" type="button">Otra imagen</button>
+          </div>
+        </aside>
+
+        <!-- ---------------------------------------------------- curvas --- -->
+        <aside
+          class="controls"
+          id="panel-curves"
+          role="tabpanel"
+          aria-labelledby="tab-curves"
+          hidden
+        >
+          <div class="notice">
+            <h2>El motor de curvas todavía no está</h2>
+            <p>
+              El modo pixel art da por hecho que la imagen tiene una rejilla
+              regular: la detecta, reduce la imagen a un píxel por celda y traza
+              contornos rectos. Con una foto ese supuesto no se sostiene.
+            </p>
+            <p>Las curvas necesitan dos piezas que aún no existen:</p>
+            <ul>
+              <li>
+                <b>Segmentación por clustering</b>, para agrupar los colores de
+                una foto en regiones, filtrar las motas y bandear los degradados.
+              </li>
+              <li>
+                <b>Ajuste de Béziers</b>: simplificar el contorno, detectar las
+                esquinas y ajustar curvas al resto sin abrir costuras entre
+                regiones vecinas.
+              </li>
+            </ul>
+            <p class="notice-foot">
+              La imagen que cargues se queda en memoria, así que podrás
+              convertirla en cuanto esté.
+            </p>
+          </div>
+
+          <div class="actions">
+            <button id="resetCurves" type="button">Otra imagen</button>
           </div>
         </aside>
       </div>
@@ -133,10 +233,21 @@
     </main>
 
     <footer>
-      <p>
+      <p id="footerNote">
         Detecta la rejilla midiendo la periodicidad del gradiente, reduce la
         imagen a sus píxeles reales y traza el contorno de cada región con
         <code>fill-rule="evenodd"</code>.
+      </p>
+      <p>
+        <a class="repo" href="https://github.com/jgermade/px2svg">
+          <svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16">
+            <path
+              fill="currentColor"
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+            />
+          </svg>
+          Código en GitHub
+        </a>
       </p>
     </footer>
 
