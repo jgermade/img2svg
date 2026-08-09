@@ -110,20 +110,56 @@ has now held across roughly 285,000 chains of a noisy 1.4 Mpx image.
 Measured end to end on the 4.2 Mpx corpus image: 340 ms clustering, 112 ms
 boundaries, 30 ms to write the SVG.
 
+**Speck filtering** (`speckle.rs`). Without it the output is not usable: a real
+image leaves clustering with 12k–31k regions, and each one is a `<path>`.
+
+Looking at a magnified conversion shows two different kinds of speck, and only one
+of them is what everybody filters. Isolated dots, which an area threshold removes.
+And **bands one pixel wide** running along every colour boundary — the antialiasing
+fringe of the source — where a 1×8 band has eight pixels and the area threshold,
+which is all `--filter-speckle` does in VTracer, never sees it. So there are two
+criteria here, area and **thickness**, estimated as `2 × area / perimeter`: that
+ratio stays near 0.5 for a band however long it is, while for a compact block of
+side `s` it is `s/2` and grows with size. Unlike measuring the bounding box, it
+does not care about orientation — a one-pixel-wide diagonal has a box as tall as
+it is long.
+
+Measured on one corpus image, and the second criterion is the one doing the work:
+
+| filter | regions | colours | SVG |
+| --- | --- | --- | --- |
+| none | 12,498 | 142 | 549 KB |
+| area ≤ 4 only | 4,157 | 117 | 246 KB |
+| **default: area ≤ 4, thickness < 1** | **1,298** | 74 | 117 KB |
+| area ≤ 8, thickness < 1.5 | 787 | 58 | 72 KB |
+
+A speck merges into the neighbour it **shares the most border with**, not the
+biggest one. A fringe band is by definition the edge of the region it fringes;
+picking by size would send it to whatever large area barely touches it, and the
+fringe would come back as a step of the wrong colour right on the contour.
+
+It runs on the label image, before boundaries are extracted. Merging afterwards
+would mean surgery on the IR — dissolving a half-edge and re-chaining the rings of
+both faces, with the interesting case being a speck whose removal joins two of its
+neighbour's rings into one. Doing it earlier is the same result without any of
+that.
+
+One thing it deliberately does not do: a speck with no visible neighbour stays.
+That is a lone dot on transparency, and the alternative is punching a hole where
+there was drawing.
+
 ## What is missing
 
-**Speck filtering and gradient banding.** Any region under N pixels should merge
-into its largest neighbour — `right` is now populated, so the neighbour is there
-to be found. And a vector format has no cheap per-region gradient, so a smooth
-ramp has to become discrete bands on purpose.
+**Gradient banding.** A vector format has no cheap per-region gradient, so a
+smooth ramp has to become discrete bands on purpose — quantise `Oklab.l` before
+the palette is built, which is what having lightness on its own axis was for.
 
 One prediction in the plan turns out not to hold, and it is worth correcting
 rather than repeating: unfiltered specks were supposed to make the SVG *bigger
 than the PNG*. Measured, it comes out at 0.2–0.6× the PNG — but only because
 these particular PNGs are pathologically noisy pixel art with 64k–159k distinct
-colours, so they compress badly. The case for the speck filter stands on path
-count, not on file size: 18,317 paths in one document is unusable in an editor
-whatever it weighs.
+colours, so they compress badly. The case for the speck filter stood on path
+count, not on file size, and that is how it was judged.
 
 **Bézier fitting.** Simplifying each contour, detecting the corners so they stay
 sharp, and least-squares fitting curves to the rest.

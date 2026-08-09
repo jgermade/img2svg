@@ -47,6 +47,7 @@ use std::collections::HashMap;
 use image::RgbaImage;
 
 use crate::color::{Oklab, Rgba};
+use crate::speckle;
 
 /// Etiqueta de un píxel que no pertenece a ninguna región por ser transparente.
 ///
@@ -67,6 +68,12 @@ pub struct ClusterOptions {
     pub tolerance: f64,
     /// Alfa mínimo para considerar visible un píxel.
     pub alpha_threshold: u8,
+    /// Área hasta la que una región se funde con una vecina. `0` no funde nada.
+    /// Ver [`crate::speckle`].
+    pub filter_speckle: usize,
+    /// Grosor por debajo del cual una región se funde con una vecina, aunque su
+    /// área sea grande. `0` no funde nada. Ver [`crate::speckle::thickness`].
+    pub min_thickness: f64,
 }
 
 impl Default for ClusterOptions {
@@ -75,6 +82,8 @@ impl Default for ClusterOptions {
             color_precision: 5,
             tolerance: 0.045,
             alpha_threshold: 128,
+            filter_speckle: 4,
+            min_thickness: 1.0,
         }
     }
 }
@@ -170,7 +179,13 @@ pub fn from_image(img: &RgbaImage, options: &ClusterOptions) -> Clustering {
         std::mem::swap(&mut prev, &mut cur);
     }
 
-    finish(labels, w, h, &mut sets, &run_color, &palette)
+    let mut clustering = finish(labels, w, h, &mut sets, &run_color);
+    speckle::filter(
+        &mut clustering,
+        options.filter_speckle,
+        options.min_thickness,
+    );
+    clustering
 }
 
 /// Un tramo horizontal de igual representante. `end` es inclusivo.
@@ -180,38 +195,64 @@ struct Run {
     id: u32,
 }
 
-/// Cierra el etiquetado: resuelve cada tramo a su raíz, ordena las regiones para
-/// la emisión y reescribe las etiquetas con el índice definitivo.
+/// Cierra el etiquetado: resuelve cada tramo a su raíz y arma el resultado.
 fn finish(
-    mut labels: Vec<u32>,
+    labels: Vec<u32>,
     width: usize,
     height: usize,
     sets: &mut Sets,
     run_color: &[Rgba],
-    palette: &Palette,
 ) -> Clustering {
-    let n = sets.len();
+    let root_of: Vec<u32> = (0..sets.len() as u32).map(|id| sets.find(id)).collect();
+    gather(labels, width, height, &root_of, run_color)
+}
+
+/// Ordena las regiones para la emisión y reescribe las etiquetas con el índice
+/// definitivo.
+///
+/// Vive aquí y lo usan dos etapas —el etiquetado y el filtrado de motas— porque el
+/// orden que produce no es cosmético: [`crate::svg::render`] recorre tramos
+/// contiguos de igual color y abre un `<g>` por cada tramo, así que si las
+/// regiones de un color dejan de ir seguidas, el documento pasa de un grupo por
+/// color a un grupo por región. Con la regla en un solo sitio, eso no se puede
+/// romper a medias.
+///
+/// - `root_of` lleva de cada etiqueta actual a su raíz, que es lo que agrupa.
+/// - `color_of` da el color de cada raíz, indexado igual que `root_of`.
+pub(crate) fn gather(
+    mut labels: Vec<u32>,
+    width: usize,
+    height: usize,
+    root_of: &[u32],
+    color_of: &[Rgba],
+) -> Clustering {
+    let n = root_of.len();
     let mut area = vec![0usize; n];
     let mut first = vec![usize::MAX; n];
     for (i, &label) in labels.iter().enumerate() {
         if label == NONE {
             continue;
         }
-        let root = sets.find(label) as usize;
+        let root = root_of[label as usize] as usize;
         area[root] += 1;
         if first[root] == usize::MAX {
             first[root] = i;
         }
     }
 
-    // Sólo las raíces con píxeles son regiones; el resto de tramos se han unido
-    // a alguna de ellas.
+    // Sólo las raíces con píxeles son regiones; lo demás se ha unido a alguna.
     let mut roots: Vec<u32> = (0..n as u32).filter(|&r| area[r as usize] > 0).collect();
+
+    // Los colores más presentes primero, para que los paths grandes queden al
+    // fondo del documento. El peso de un color es lo que suman sus regiones.
+    let mut weight: HashMap<Rgba, usize> = HashMap::new();
+    for &r in &roots {
+        *weight.entry(color_of[r as usize]).or_insert(0) += area[r as usize];
+    }
     roots.sort_by(|&a, &b| {
-        let (ca, cb) = (run_color[a as usize], run_color[b as usize]);
-        palette
-            .weight(cb)
-            .cmp(&palette.weight(ca))
+        let (ca, cb) = (color_of[a as usize], color_of[b as usize]);
+        weight[&cb]
+            .cmp(&weight[&ca])
             .then(order_key(ca).cmp(&order_key(cb)))
             .then(first[a as usize].cmp(&first[b as usize]))
     });
@@ -222,14 +263,14 @@ fn finish(
     }
     for label in labels.iter_mut() {
         if *label != NONE {
-            *label = label_of[sets.find(*label) as usize];
+            *label = label_of[root_of[*label as usize] as usize];
         }
     }
 
     let clusters = roots
         .iter()
         .map(|&r| Cluster {
-            color: run_color[r as usize],
+            color: color_of[r as usize],
             area: area[r as usize],
         })
         .collect();
@@ -239,13 +280,13 @@ fn finish(
         height,
         labels,
         clusters,
-        colors: palette.colors(),
+        colors: weight.len(),
     }
 }
 
 /// Desempate estable entre dos colores igual de frecuentes, para que la salida
 /// no dependa del orden en que los haya recorrido una tabla hash.
-fn order_key(c: Rgba) -> (u8, u8, u8, u8) {
+pub(crate) fn order_key(c: Rgba) -> (u8, u8, u8, u8) {
     (c.r, c.g, c.b, c.a)
 }
 
@@ -253,9 +294,6 @@ fn order_key(c: Rgba) -> (u8, u8, u8, u8) {
 struct Palette {
     bits: u8,
     representative: HashMap<Rgba, Rgba>,
-    /// Píxeles que suman todos los colores de cada representante. Fija el orden
-    /// de emisión.
-    weight: HashMap<Rgba, usize>,
 }
 
 impl Palette {
@@ -284,9 +322,8 @@ impl Palette {
 
         let mut entries: Vec<(Rgba, Oklab)> = Vec::new();
         let mut representative = HashMap::with_capacity(distinct.len());
-        let mut weight: HashMap<Rgba, usize> = HashMap::new();
 
-        for (color, count) in distinct {
+        for (color, _) in distinct {
             let lab = Oklab::from(color);
             let near = entries
                 .iter()
@@ -303,13 +340,11 @@ impl Palette {
                 }
             };
             representative.insert(color, entry);
-            *weight.entry(entry).or_insert(0) += count;
         }
 
         Palette {
             bits,
             representative,
-            weight,
         }
     }
 
@@ -322,14 +357,6 @@ impl Palette {
         // Está siempre: la paleta se construyó sobre estos mismos píxeles, con
         // esta misma cuantización y este mismo umbral de alfa.
         Some(self.representative[&quantized])
-    }
-
-    fn weight(&self, entry: Rgba) -> usize {
-        self.weight.get(&entry).copied().unwrap_or(0)
-    }
-
-    fn colors(&self) -> usize {
-        self.weight.len()
     }
 }
 

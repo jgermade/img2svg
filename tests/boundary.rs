@@ -61,9 +61,20 @@ fn imagen(rows: &[&str], paleta: &[(char, Rgba)]) -> RgbaImage {
     img
 }
 
+/// Las opciones de este fichero, con el filtrado de motas **apagado**: aquí se
+/// prueba el agrupado y no el filtro, y con el umbral por defecto —cuatro
+/// píxeles— casi cualquier región de un dibujo de ejemplo sería una mota.
+fn opciones() -> ClusterOptions {
+    ClusterOptions {
+        filter_speckle: 0,
+        min_thickness: 0.0,
+        ..ClusterOptions::default()
+    }
+}
+
 fn contornos(rows: &[&str], paleta: &[(char, Rgba)]) -> Regions {
     let img = imagen(rows, paleta);
-    let clustering = cluster::from_image(&img, &ClusterOptions::default());
+    let clustering = cluster::from_image(&img, &opciones());
     boundary::from_clustering(&clustering)
 }
 
@@ -349,6 +360,26 @@ fn el_documento_sale_valido() {
 }
 
 #[test]
+fn las_etiquetas_ya_filtradas_dan_contornos_sanos() {
+    // El resto del fichero extrae contornos de un etiquetado sin filtrar. Filtrar
+    // reasigna etiquetas y reordena regiones, así que la cadena completa —con las
+    // opciones de verdad, no las de los tests— quiere su propia comprobación.
+    let img = imagen(
+        &[
+            "RRRRGGGG", "RRRRGGGG", "RRAGGGGG", "AAAAGGGG", "RRRRGGGG", "RRRRGGGG",
+        ],
+        &[('R', ROJO), ('G', VERDE), ('A', AZUL)],
+    );
+    let clustering = cluster::from_image(&img, &ClusterOptions::default());
+    let r = boundary::from_clustering(&clustering);
+    comprueba_areas(&r);
+    assert_eq!(
+        r.regions.iter().map(|region| region.area).sum::<usize>(),
+        48
+    );
+}
+
+#[test]
 fn una_imagen_grande_termina() {
     let (w, h) = (1200u32, 1200u32);
     let mut img = RgbaImage::new(w, h);
@@ -361,7 +392,7 @@ fn una_imagen_grande_termina() {
             255,
         ]);
     }
-    let clustering = cluster::from_image(&img, &ClusterOptions::default());
+    let clustering = cluster::from_image(&img, &opciones());
     let empezado = std::time::Instant::now();
     let r = boundary::from_clustering(&clustering);
     println!(

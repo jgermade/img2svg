@@ -31,6 +31,8 @@ pub mod fit;
 pub mod grid;
 pub mod region;
 pub mod segment;
+#[cfg(feature = "photo")]
+pub mod speckle;
 pub mod svg;
 pub mod trace;
 

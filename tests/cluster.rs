@@ -53,8 +53,19 @@ fn imagen(rows: &[&str], paleta: &[(char, Rgba)]) -> RgbaImage {
     img
 }
 
+/// Las opciones de este fichero, con el filtrado de motas **apagado**: aquí se
+/// prueba el agrupado y no el filtro, y con el umbral por defecto —cuatro
+/// píxeles— casi cualquier región de un dibujo de ejemplo sería una mota.
+fn opciones() -> ClusterOptions {
+    ClusterOptions {
+        filter_speckle: 0,
+        min_thickness: 0.0,
+        ..ClusterOptions::default()
+    }
+}
+
 fn segmenta(rows: &[&str], paleta: &[(char, Rgba)]) -> Clustering {
-    cluster::from_image(&imagen(rows, paleta), &ClusterOptions::default())
+    cluster::from_image(&imagen(rows, paleta), &opciones())
 }
 
 /// Las regiones como `(color, área)`, que es lo que se quiere afirmar casi
@@ -249,7 +260,7 @@ fn el_resultado_no_depende_del_recorrido_de_la_tabla_hash() {
 /// prometerlo, porque cada fusión mueve el color del grupo.
 #[test]
 fn ningun_pixel_se_pinta_mas_lejos_de_la_tolerancia() {
-    let options = ClusterOptions::default();
+    let options = opciones();
     let mut img = RgbaImage::new(256, 32);
     for (x, y, px) in img.enumerate_pixels_mut() {
         // Un degradado en dos direcciones, para que la rampa no sea sólo gris.
@@ -286,7 +297,7 @@ fn un_degradado_se_reparte_en_bandas() {
     for (x, _, px) in img.enumerate_pixels_mut() {
         *px = image::Rgba([x as u8, x as u8, x as u8, 255]);
     }
-    let c = cluster::from_image(&img, &ClusterOptions::default());
+    let c = cluster::from_image(&img, &opciones());
     assert!(
         c.colors > 10 && c.colors < 60,
         "la rampa de grises da {} bandas",
@@ -306,14 +317,14 @@ fn una_tolerancia_mas_alta_da_menos_regiones() {
         &img,
         &ClusterOptions {
             tolerance: 0.2,
-            ..ClusterOptions::default()
+            ..opciones()
         },
     );
     let muchas = cluster::from_image(
         &img,
         &ClusterOptions {
             tolerance: 0.01,
-            ..ClusterOptions::default()
+            ..opciones()
         },
     );
     assert!(
@@ -338,7 +349,7 @@ fn menos_bits_dan_menos_colores() {
             &ClusterOptions {
                 color_precision: b,
                 tolerance: 0.0,
-                ..ClusterOptions::default()
+                ..opciones()
             },
         )
         .colors
@@ -365,7 +376,7 @@ fn una_imagen_grande_termina_en_un_tiempo_razonable() {
         ]);
     }
     let empezado = std::time::Instant::now();
-    let c = cluster::from_image(&img, &ClusterOptions::default());
+    let c = cluster::from_image(&img, &opciones());
     let tardado = empezado.elapsed();
     println!(
         "{}x{} en {:?}: {} colores, {} regiones",
