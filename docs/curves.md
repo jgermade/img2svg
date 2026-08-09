@@ -24,6 +24,40 @@ pixels instead of the upscaling artefacts. Feed an 8× sprite to a general
 vectoriser and it traces the staircase of the rescale; this would trace the
 drawing.
 
+## What is built so far
+
+Two pieces of colour groundwork, both under the `photo` cargo feature so the
+pixel-art wasm bundle can leave the photo code out:
+
+**Oklab** (`color.rs`). Clustering needs a colour distance where one threshold
+means the same thing everywhere, and the existing weighted-RGB distance is not
+it: its weights are luminance coefficients, so what it really measures is how
+much the *brightness* changed. On saturated colours that inverts the eye's
+ordering — pushing a full channel of blue into saturated yellow scores 19.9 while
+a dark blue visibly shifting hue scores 13.3, and Oklab puts the second nearly
+six times further apart than the first. No single threshold works on the first
+metric: the one that respects a sky's blues shatters every saturated surface, and
+the one that does not shatter them smears the sky into a blob.
+
+Worth being precise about what this does *not* buy, since it is easy to oversell:
+down a greyscale ramp the RGB distance is already reasonable — sRGB's gamma is
+itself roughly perceptual, and Oklab only corrects shadows against highlights by
+about 50%. The win is in chroma, not in light. Separately, having lightness on
+its own axis is what gradient banding will need: quantising the light while
+leaving the hue alone cannot be expressed over three RGB channels.
+
+**Channel quantisation** (`Rgba::quantize`). Run boundaries have to be stable, so
+colours are cut down to `2^bits` levels per channel *before* clustering — two
+pixels differing only in last-bit noise then land on the same value instead of
+opening a boundary where there is no edge.
+
+It rounds to the **nearest** level rather than keeping the top bits, which is the
+usual shortcut and what VTracer's `--color-precision` does. Truncation always
+rounds down, so every channel loses half a level on average — four values out of
+255 at 5 bits — and the whole image comes out slightly duller. The bias is
+invisible in any one colour and plain across an image, which is why the test for
+it checks the mean over the ramp rather than individual values.
+
 ## What is missing
 
 **Clustering.** Grouping a photo's colours into regions, filtering out specks,

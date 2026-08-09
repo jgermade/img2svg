@@ -9,5 +9,5 @@
 # commitea el cambio junto con lo que haya que ajustar.
 [toolchain]
 channel = "1.93.0"
-components = ["rustfmt", "clippy"]
+components = ["rust-analyzer", "rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]
