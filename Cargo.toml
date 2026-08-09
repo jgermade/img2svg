@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Convierte imágenes en SVG. Modo pixel art: detecta la rejilla y une los píxeles del mismo color en paths"
 repository = "https://github.com/jgermade/img2svg"
+license = "MIT"
 autoexamples = false
 
 [lib]

@@ -6,7 +6,7 @@
 use js_sys::Reflect;
 use wasm_bindgen::prelude::*;
 
-use crate::{Config, Grouping};
+use crate::{Config, GridOptions, Grouping};
 
 /// Resultado de la conversión, con los datos de la rejilla empleada.
 #[wasm_bindgen]
@@ -106,10 +106,15 @@ pub fn convert_rgba(
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Lee el objeto plano que manda la página.
+///
+/// Las claves son deliberadamente **planas** y no reflejan la partición interna
+/// en segmentación y ajuste: son la API pública que consume `web/app.js`, y
+/// cambiarlas rompería la página sin avisar en tiempo de compilación.
 fn read_config(options: &JsValue) -> Config {
-    let default = Config::default();
+    let default = GridOptions::default();
     if options.is_falsy() {
-        return default;
+        return Config::default();
     }
     let number = |key: &str| -> Option<f64> {
         Reflect::get(options, &JsValue::from_str(key))
@@ -130,7 +135,7 @@ fn read_config(options: &JsValue) -> Config {
             .map(|v| v.is_truthy())
     };
 
-    Config {
+    let grid = GridOptions {
         scale: number("scale"),
         offset: number("offsetX").zip(number("offsetY")),
         tolerance: number("tolerance").unwrap_or(default.tolerance),
@@ -138,7 +143,6 @@ fn read_config(options: &JsValue) -> Config {
             .map(|v| v.clamp(0.0, 255.0) as u8)
             .unwrap_or(default.alpha_threshold),
         pixel_size: number("pixelSize").map(|v| v.max(1.0) as u32),
-        background: text("background"),
         grouping: if flag("mergeColors").unwrap_or(false) {
             Grouping::Color
         } else {
@@ -146,5 +150,10 @@ fn read_config(options: &JsValue) -> Config {
         },
         remove_checkerboard: flag("removeCheckerboard").unwrap_or(default.remove_checkerboard),
         remove_background: flag("removeBackground").unwrap_or(default.remove_background),
+    };
+
+    Config {
+        background: text("background"),
+        ..Config::grid(grid)
     }
 }

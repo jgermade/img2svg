@@ -19,7 +19,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::{check, check_digest, fingerprint};
-use img2svg::{Config, Conversion, Grouping};
+use img2svg::{Config, Conversion, GridOptions, Grouping};
 
 /// Las tres imágenes, con nombre corto estable: el de Gemini no dice nada y
 /// cambiaría la instantánea entera si alguien renombra el fichero.
@@ -136,10 +136,10 @@ fn simple_ejes_con_celda_distinta() {
 /// abrir ese diff.
 #[test]
 fn simple_sin_tolerancia() {
-    let config = Config {
+    let config = Config::grid(GridOptions {
         tolerance: 0.0,
-        ..Config::default()
-    };
+        ..GridOptions::default()
+    });
     let Some(out) = snapshot_digest("corpus-simple-sin-tolerancia", SIMPLE, &config) else {
         return;
     };
@@ -154,10 +154,10 @@ fn simple_sin_tolerancia() {
 
 #[test]
 fn simple_un_path_por_color() {
-    let config = Config {
+    let config = Config::grid(GridOptions {
         grouping: Grouping::Color,
-        ..Config::default()
-    };
+        ..GridOptions::default()
+    });
     let Some(out) = snapshot("corpus-simple-un-path-por-color", SIMPLE, &config) else {
         return;
     };
@@ -173,10 +173,10 @@ fn simple_un_path_por_color() {
 /// comportamiento para que el refactor no lo cambie por accidente.
 #[test]
 fn damero_conservado() {
-    let config = Config {
+    let config = Config::grid(GridOptions {
         remove_checkerboard: false,
-        ..Config::default()
-    };
+        ..GridOptions::default()
+    });
     let Some(out) = snapshot("corpus-damero-conservado", DAMERO, &config) else {
         return;
     };

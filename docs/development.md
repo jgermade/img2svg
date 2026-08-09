@@ -82,16 +82,35 @@ silent pass.
 
 ## CI
 
-`.github/workflows/build.yml` runs on every push to `main`: format, clippy, tests
-in debug and release, the wasm build, and the Pages deploy. Pages must be enabled
-under **Settings → Pages → Source: GitHub Actions**.
+**`build.yml`** runs on every push to `main`: format, clippy, tests in debug and
+release, and the wasm build. It publishes nothing — it just leaves the built
+`web/` as an artifact.
 
 Tests run in debug *as well as* release because release turns overflow checks
 off — that is exactly how a `u8` underflow in `checker.rs` survived unnoticed.
 
-`.github/workflows/release.yml` is manual: pick `patch`, `minor` or `major`, and
-it bumps the version, tags, reuses `build.yml`, and publishes a release with the
-CLI binaries attached.
+**`release.yml`** is manual: pick `patch`, `minor` or `major` from the
+`workflow_dispatch` menu. It bumps the version in `Cargo.toml` and `Cargo.lock`,
+commits as `release: vX.Y.Z`, tags, then reuses `build.yml` on that commit and
+fans out into:
+
+- **`pages`** — deploys the site. Pages must be enabled under **Settings → Pages
+  → Source: GitHub Actions**.
+- **`binaries`** — the CLI for five targets (macOS arm64/x86_64, Linux
+  arm64/x86_64, Windows x86_64).
+- **`publish`** — creates the GitHub release with all of it attached, the web
+  package included.
+
+**The site only updates on release**, not on every push to `main`. That is
+deliberate: what is published then always corresponds to a tagged version.
+
+Two details worth knowing before editing these:
+
+- `build.yml` skips its own run when the commit message starts with `release:`,
+  otherwise every release would trigger a duplicate build.
+- The reusable call passes an explicit `ref`. A called workflow checks out the
+  default branch, so without it the release would build the commit *before* the
+  version bump.
 
 ## Language
 

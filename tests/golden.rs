@@ -15,7 +15,7 @@
 mod common;
 
 use common::check;
-use img2svg::{Config, Conversion, Grouping};
+use img2svg::{Config, Conversion, Fit, GridOptions, Grouping, Segmentation};
 
 /// Paleta del arte ASCII. Sólo ASCII: las filas se miden en bytes.
 fn paint(ch: char) -> Option<[u8; 4]> {
@@ -56,10 +56,10 @@ fn convert(rows: &[&str], scale: usize, config: &Config) -> Conversion {
 
 /// Escala forzada a 1: la rejilla se toma como dada en vez de detectarla.
 fn sin_detectar() -> Config {
-    Config {
+    Config::grid(GridOptions {
         scale: Some(1.0),
-        ..Config::default()
-    }
+        ..GridOptions::default()
+    })
 }
 
 /// Sprite asimétrico con todo lo que puede romperse en silencio: huecos
@@ -145,18 +145,13 @@ fn rejilla_detectada() {
 /// `width`/`height` de render: por defecto sigue a la celda detectada.
 #[test]
 fn la_escala_no_cambia_el_resultado() {
-    let base = Config {
+    let base = Config::grid(GridOptions {
         pixel_size: Some(1),
-        ..Config::default()
-    };
-    let forzado = convert(
-        SPRITE,
-        1,
-        &Config {
-            scale: Some(1.0),
-            ..base.clone()
-        },
-    );
+        ..GridOptions::default()
+    });
+    let mut forced = base.clone();
+    forced.grid_options_mut().scale = Some(1.0);
+    let forzado = convert(SPRITE, 1, &forced);
     let cinco = convert(SPRITE, 5, &base);
     let siete = convert(SPRITE, 7, &base);
     assert_eq!(
@@ -168,10 +163,8 @@ fn la_escala_no_cambia_el_resultado() {
 
 #[test]
 fn un_path_por_color() {
-    let config = Config {
-        grouping: Grouping::Color,
-        ..sin_detectar()
-    };
+    let mut config = sin_detectar();
+    config.grid_options_mut().grouping = Grouping::Color;
     let out = convert(SPRITE, 1, &config);
     assert_eq!(out.paths, out.colors, "un path por color, sin <g>");
     assert!(out.subpaths > out.paths, "y varios subtrazados dentro");
@@ -180,10 +173,8 @@ fn un_path_por_color() {
 
 #[test]
 fn fondo_retirado_y_recortado() {
-    let config = Config {
-        remove_background: true,
-        ..sin_detectar()
-    };
+    let mut config = sin_detectar();
+    config.grid_options_mut().remove_background = true;
     let out = convert(SOBRE_FONDO, 1, &config);
     let fondo = out.background.expect("debe encontrar el fondo liso");
     assert_eq!(fondo.to_hex(), "#fafafa");
@@ -216,14 +207,19 @@ fn fondo_conservado() {
 /// alta) no deben arrastrarlos.
 #[test]
 fn los_defaults_no_derivan() {
-    let d = Config::default();
+    let d = GridOptions::default();
     assert_eq!(d.scale, None);
     assert_eq!(d.offset, None);
     assert_eq!(d.tolerance, 12.0);
     assert_eq!(d.alpha_threshold, 128);
     assert_eq!(d.pixel_size, None);
-    assert_eq!(d.background, None);
     assert_eq!(d.grouping, Grouping::Region);
     assert!(d.remove_checkerboard);
     assert!(!d.remove_background);
+
+    // Y los del eje compartido: sin fondo, y ajuste de píxel.
+    let c = Config::default();
+    assert_eq!(c.background, None);
+    assert_eq!(c.fit, Fit::Pixel);
+    assert!(matches!(c.segmentation, Segmentation::Grid(_)));
 }

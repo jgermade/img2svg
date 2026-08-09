@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
-use img2svg::{Config, Grouping};
+use img2svg::{Config, GridOptions, Grouping};
 
 /// Convierte imágenes en SVG.
 #[derive(Parser)]
@@ -84,13 +84,12 @@ struct Pixelart {
 
 impl Pixelart {
     fn config(&self) -> Config {
-        Config {
+        let grid = GridOptions {
             scale: self.scale,
             offset: self.offset.as_ref().map(|o| (o[0], o[1])),
             tolerance: self.tolerance,
             alpha_threshold: self.alpha_threshold,
             pixel_size: self.pixel_size,
-            background: self.common.background.clone(),
             grouping: if self.merge_colors {
                 Grouping::Color
             } else {
@@ -98,6 +97,10 @@ impl Pixelart {
             },
             remove_checkerboard: !self.keep_checkerboard,
             remove_background: self.remove_background,
+        };
+        Config {
+            background: self.common.background.clone(),
+            ..Config::grid(grid)
         }
     }
 }

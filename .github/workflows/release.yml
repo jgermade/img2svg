@@ -1,6 +1,8 @@
 name: Release
 
-# Manual: se elige qué parte de la versión sube y el resto va solo.
+# Manual: se elige qué parte de la versión sube y el resto va solo. Aquí es
+# también donde se publica el sitio, para que Pages corresponda siempre a una
+# versión etiquetada y no al último push a main.
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +14,7 @@ on:
         options: [patch, minor, major]
 
 # `jobs.<id>.uses` ejecuta un workflow entero y no comparte job con steps
-# normales, así que esto va en tres: subir la versión, compilar, publicar.
+# normales, así que esto va por jobs encadenados.
 permissions:
   contents: write
   pages: write
@@ -50,8 +52,13 @@ jobs:
 
           # Sólo la primera aparición: es la del paquete, no la de una dependencia.
           perl -pi -e 'if (!$done && s/^version = ".*"/version = "'"$version"'"/) { $done = 1 }' Cargo.toml
-          cargo update --workspace --offline
 
+          # Sin `--offline`: el runner llega con el índice del registro vacío y
+          # no podría resolver las dependencias. `--workspace` sólo cambia la
+          # versión de los miembros del workspace, no actualiza las dependencias.
+          cargo update --workspace
+
+          grep -q "^version = \"$version\"" Cargo.toml
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Commit y etiqueta
@@ -75,8 +82,30 @@ jobs:
       ref: ${{ needs.bump.outputs.sha }}
     permissions:
       contents: read
-      pages: write
-      id-token: write
+
+  # Publicar el sitio. El artefacto de Pages tiene que subirlo
+  # `upload-pages-artifact` en esta misma ejecución, de ahí el paso intermedio
+  # de bajar el que dejó build.yml y volver a subirlo en su formato.
+  pages:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: web
+          path: web
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web
+
+      - id: deployment
+        uses: actions/deploy-pages@v5
 
   binaries:
     needs: [bump, build]
@@ -84,9 +113,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-latest,   target: aarch64-apple-darwin }
-          - { runner: macos-13,       target: x86_64-apple-darwin }
-          - { runner: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          - { runner: macos-latest, target: aarch64-apple-darwin }
+          - { runner: macos-13, target: x86_64-apple-darwin }
+          - { runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
           - { runner: windows-latest, target: x86_64-pc-windows-msvc }
     runs-on: ${{ matrix.runner }}
@@ -120,7 +149,7 @@ jobs:
           else
             cp "target/${{ matrix.target }}/release/img2svg" "dist/$name/"
           fi
-          cp README.md "dist/$name/"
+          cp README.md LICENSE "dist/$name/"
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             7z a "$name.zip" "$name"
@@ -139,6 +168,8 @@ jobs:
   publish:
     needs: [bump, binaries]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -146,7 +177,7 @@ jobs:
 
       # El paquete web va también: es la build completa del sitio, por si
       # alguien quiere incrustarla.
-      - name: Empaquetar el web
+      - name: Reunir los adjuntos
         run: |
           set -euo pipefail
           mkdir -p release

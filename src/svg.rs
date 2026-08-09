@@ -1,25 +1,12 @@
-//! Generación del documento SVG.
+//! Generación del documento SVG a partir de las regiones ya ajustadas.
 //!
-//! Cada bloque de píxeles contiguos del mismo color es un `<path>`, y todos los
-//! bloques de un color van dentro de un `<g fill="…">`. Así el documento se
-//! puede editar bloque a bloque en un editor vectorial en vez de tener una sola
-//! figura por color repartida por todo el dibujo.
+//! Todas las regiones de un color van dentro de un `<g fill="…">`, y cada una es
+//! un `<path>`. Así el documento se puede editar bloque a bloque en un editor
+//! vectorial en vez de tener una sola figura por color repartida por todo el
+//! dibujo.
 
-use std::collections::HashMap;
-
-use crate::color::Rgba;
-use crate::grid::PixelMap;
-use crate::trace::{self, Point};
-
-/// Cómo se reparten los píxeles entre los `<path>` del documento.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Grouping {
-    /// Un path por bloque de píxeles contiguos.
-    #[default]
-    Region,
-    /// Un único path por color, con todos sus bloques como subtrazados.
-    Color,
-}
+use crate::fit::{self, Fit};
+use crate::region::Regions;
 
 pub struct Options {
     /// Tamaño de render de cada píxel lógico. El `viewBox` va siempre en píxeles
@@ -27,7 +14,7 @@ pub struct Options {
     pub pixel_size: u32,
     /// Color de fondo opcional (se emite como rectángulo bajo los paths).
     pub background: Option<String>,
-    pub grouping: Grouping,
+    pub fit: Fit,
 }
 
 pub struct Output {
@@ -39,19 +26,8 @@ pub struct Output {
     pub subpaths: usize,
 }
 
-pub fn render(map: &PixelMap, opts: &Options) -> Output {
-    let mut order: Vec<Rgba> = Vec::new();
-    let mut counts: HashMap<Rgba, usize> = HashMap::new();
-    for pixel in map.pixels.iter().flatten() {
-        if counts.insert(*pixel, 0).is_none() {
-            order.push(*pixel);
-        }
-        *counts.get_mut(pixel).unwrap() += 1;
-    }
-    // Los colores más presentes primero: paths grandes al fondo del documento.
-    order.sort_by(|a, b| counts[b].cmp(&counts[a]).then(a.to_hex().cmp(&b.to_hex())));
-
-    let (w, h) = (map.width as i64, map.height as i64);
+pub fn render(regions: &Regions, opts: &Options) -> Output {
+    let (w, h) = (regions.width as i64, regions.height as i64);
     let scale = opts.pixel_size.max(1) as i64;
 
     let mut body = String::new();
@@ -61,43 +37,31 @@ pub fn render(map: &PixelMap, opts: &Options) -> Output {
         ));
     }
 
-    let mut scratch = vec![false; map.pixels.len()];
     let mut total_paths = 0;
     let mut total_subpaths = 0;
 
-    for color in &order {
-        let mask: Vec<bool> = map
-            .pixels
+    // Las regiones llegan con las de un color seguidas, así que basta con
+    // avanzar por tramos.
+    let mut i = 0;
+    while i < regions.regions.len() {
+        let color = regions.regions[i].color;
+        let end = regions.regions[i..]
             .iter()
-            .map(|p| p.as_ref() == Some(color))
-            .collect();
+            .position(|r| r.color != color)
+            .map_or(regions.regions.len(), |n| i + n);
 
-        let blocks: Vec<Vec<Vec<Point>>> = match opts.grouping {
-            Grouping::Color => vec![trace::trace(&mask, map.width, map.height)],
-            Grouping::Region => trace::components(&mask, map.width, map.height)
-                .into_iter()
-                .map(|region| {
-                    for &i in &region {
-                        scratch[i] = true;
-                    }
-                    let loops = trace::trace(&scratch, map.width, map.height);
-                    for &i in &region {
-                        scratch[i] = false;
-                    }
-                    loops
-                })
-                .collect(),
-        };
-
-        let paths: Vec<String> = blocks
+        let paths: Vec<String> = regions.regions[i..end]
             .iter()
-            .filter(|loops| !loops.is_empty())
-            .map(|loops| {
-                total_subpaths += loops.len();
-                let d: String = loops.iter().map(|points| path_data(points)).collect();
-                // El relleno par-impar sólo hace falta cuando el bloque tiene
-                // agujeros, es decir, cuando trae más de un bucle.
-                let rule = if loops.len() > 1 {
+            .map(|region| {
+                total_subpaths += region.rings.len();
+                let d: String = region
+                    .rings
+                    .iter()
+                    .map(|ring| fit::ring_data(regions, ring, opts.fit))
+                    .collect();
+                // El relleno par-impar sólo hace falta cuando la región tiene
+                // agujeros, es decir, cuando trae más de un anillo.
+                let rule = if region.rings.len() > 1 {
                     " fill-rule=\"evenodd\""
                 } else {
                     ""
@@ -105,10 +69,8 @@ pub fn render(map: &PixelMap, opts: &Options) -> Output {
                 format!("{rule} d=\"{d}\"")
             })
             .collect();
+        i = end;
 
-        if paths.is_empty() {
-            continue;
-        }
         total_paths += paths.len();
 
         let mut fill = format!(" fill=\"{}\"", color.to_hex());
@@ -139,27 +101,10 @@ viewBox=\"0 0 {w} {h}\" shape-rendering=\"crispEdges\">\n{body}</svg>\n",
 
     Output {
         svg,
-        colors: order.len(),
+        colors: regions.colors,
         paths: total_paths,
         subpaths: total_subpaths,
     }
-}
-
-/// Un subtrazado cerrado. Al ser todos los tramos horizontales o verticales se
-/// usan los comandos relativos `h`/`v`, que ocupan la mitad.
-fn path_data(points: &[Point]) -> String {
-    let mut d = format!("M{} {}", points[0].0, points[0].1);
-    for i in 1..points.len() {
-        let (px, py) = points[i - 1];
-        let (x, y) = points[i];
-        if y == py {
-            d.push_str(&format!("h{}", x - px));
-        } else {
-            d.push_str(&format!("v{}", y - py));
-        }
-    }
-    d.push('z');
-    d
 }
 
 fn trim_float(v: f64) -> String {

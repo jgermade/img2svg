@@ -17,7 +17,38 @@ let out = img2svg::convert_image(&img, &config)?;
 
 All three return the same `Conversion`.
 
-## `Config`
+## `Config`: two orthogonal axes
+
+**Segmentation** decides how the image becomes a set of regions; **fitting**
+decides how a region's contour becomes path data. They are separate stages of the
+same pipeline, so they combine freely.
+
+```rust
+pub struct Config {
+    pub segmentation: Segmentation,   // Grid(GridOptions)
+    pub fit: Fit,                     // Pixel
+    pub background: Option<String>,   // belongs to neither axis
+}
+```
+
+`Config::default()` is `Grid` segmentation with `Pixel` fitting — the pixel art
+path. To vary it:
+
+```rust
+use img2svg::{Config, GridOptions, Grouping};
+
+let config = Config::grid(GridOptions {
+    tolerance: 24.0,
+    grouping: Grouping::Color,
+    ..GridOptions::default()
+});
+
+// Or tweak in place:
+let mut config = Config::default();
+config.grid_options_mut().remove_background = true;
+```
+
+### `GridOptions`
 
 | Field | Default | Meaning |
 | --- | --- | --- |
@@ -26,10 +57,28 @@ All three return the same `Conversion`.
 | `tolerance: f64` | `12.0` | Maximum distance for merging two colours. `0` keeps them all. |
 | `alpha_threshold: u8` | `128` | Minimum alpha for a pixel to count as visible. |
 | `pixel_size: Option<u32>` | `None` | Render size per pixel. `None` reproduces the original size. |
-| `background: Option<String>` | `None` | Background rectangle colour. |
-| `grouping: Grouping` | `Region` | `Region` = one path per block, `Color` = one per colour. |
+| `grouping: Grouping` | `Region` | `Region` = one region per contiguous block, `Color` = one per colour. |
 | `remove_checkerboard: bool` | `true` | Look for the transparency checkerboard and clear it. |
 | `remove_background: bool` | `false` | Clear the flat background and crop. |
+
+`Segmentation::Cluster` (photos) and `Fit::Polygon` / `Fit::Spline` are
+[not built yet](curves.md).
+
+## The intermediate representation
+
+Between the two stages sits [`region::Regions`](../src/region.rs): a list of
+regions, each with a colour, an area and rings, plus a pool of `HalfEdge`s. A
+half-edge is a stretch of boundary with a region on each side.
+
+Boundaries are stored as half-edges rather than per-region loops on purpose. Two
+regions sharing a border must be fitted **once**, not once per face — otherwise
+the two fits disagree and a hairline shows through between them. With `h`/`v` on
+integer coordinates this cannot happen, but with Béziers it can, and the type has
+to be right before the curve fitters are written.
+
+Grid segmentation currently leaves `right` at `None`: it traces each region on
+its own and shares no geometry. Populating it comes with cluster segmentation,
+which also needs it to know which neighbour to merge a speck into.
 
 ## `Conversion`
 

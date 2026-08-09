@@ -15,9 +15,13 @@ struct Edge {
     used: bool,
 }
 
-/// Devuelve los bucles cerrados del contorno de la máscara, ya simplificados
-/// (sin vértices colineales). Incluye contornos exteriores y agujeros; se
-/// rellenan con `fill-rule="evenodd"`.
+/// Devuelve los bucles cerrados del contorno de la máscara, **densos**: un
+/// punto por cada esquina de píxel recorrida, sin colapsar los tramos rectos.
+/// Colapsarlos es cosa del ajustador de píxel ([`crate::fit`]); los de curvas
+/// necesitan los puntos intermedios para estimar tangentes.
+///
+/// Incluye contornos exteriores y agujeros; se rellenan con
+/// `fill-rule="evenodd"`.
 pub fn trace(mask: &[bool], w: usize, h: usize) -> Vec<Vec<Point>> {
     let at = |x: i64, y: i64| -> bool {
         x >= 0 && y >= 0 && x < w as i64 && y < h as i64 && mask[y as usize * w + x as usize]
@@ -79,7 +83,7 @@ pub fn trace(mask: &[bool], w: usize, h: usize) -> Vec<Vec<Point>> {
             current = next;
         }
         if points.len() >= 4 {
-            loops.push(simplify(points));
+            loops.push(points);
         }
     }
     loops
@@ -160,19 +164,4 @@ fn pick_next(
                 3
             }
         })
-}
-
-/// Elimina los vértices intermedios de los tramos rectos.
-fn simplify(points: Vec<Point>) -> Vec<Point> {
-    let n = points.len();
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let prev = points[(i + n - 1) % n];
-        let cur = points[i];
-        let next = points[(i + 1) % n];
-        if delta(prev, cur) != delta(cur, next) {
-            out.push(cur);
-        }
-    }
-    out
 }

@@ -1,5 +1,7 @@
 name: Build
 
+# Compila y prueba. No publica nada: el despliegue a Pages va en release.yml,
+# para que el sitio corresponda siempre a una versión publicada.
 on:
   push:
     branches: [main]
@@ -12,16 +14,9 @@ on:
       ref:
         type: string
         required: false
-      deploy:
-        description: Publicar en GitHub Pages.
-        type: boolean
-        required: false
-        default: true
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +26,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     # El commit del bump vuelve a disparar `on: push`; sin esto cada release
-    # lanzaría una compilación de más que no publica nada nuevo.
+    # lanzaría una compilación de más.
     if: >
       github.event_name != 'push' ||
       !startsWith(github.event.head_commit.message, 'release:')
@@ -74,30 +69,11 @@ jobs:
       - name: Copiar el logotipo
         run: cp img2svg.svg web/
 
-      # Se sube siempre, para que release.yml pueda adjuntarlo aunque no
-      # despliegue.
+      # release.yml lo recoge de aquí, para desplegarlo y para adjuntarlo.
       - name: Guardar el paquete web
         uses: actions/upload-artifact@v7
         with:
           name: web
           path: web/
+          if-no-files-found: error
           retention-days: 7
-
-      - uses: actions/configure-pages@v6
-        if: ${{ inputs.deploy != false }}
-
-      - uses: actions/upload-pages-artifact@v5
-        if: ${{ inputs.deploy != false }}
-        with:
-          path: web
-
-  deploy:
-    needs: build
-    if: ${{ inputs.deploy != false }}
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
