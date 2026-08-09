@@ -1,0 +1,12 @@
+<!--
+  Gemini_Generated_Image_s2xijjs2xijjs2xi.png  fnv f69a7b6544e1dad8
+  rejilla     100x108
+  celda       9.911 x 10.022
+  offset      1.128, 2.093
+  colores     1605
+  paths       3728
+  subtrazados 4010
+  damero      no
+  fondo       no
+-->
+<svg-fnv>482e151060f0627f</svg-fnv>  <!-- 155399 bytes -->

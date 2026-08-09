@@ -11,6 +11,9 @@
 /docs/pkg/
 /docs/px2svg.svg
 
+# Volcado de una instantánea que no cuadra, para poder hacerle un diff.
+/tests/golden/*.actual
+
 # macOS
 .DS_Store
 

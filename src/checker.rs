@@ -200,8 +200,13 @@ fn runs(labels: &[u8], w: usize, h: usize, horizontal: bool) -> Vec<(u32, u32)> 
         }
         for k in 1..segments.len().saturating_sub(1) {
             let (label, from, length) = segments[k];
+            // La etiqueta 2 es "ningún tono": no tiene pareja con la que
+            // alternar, y calcularla desbordaría.
+            if label > 1 {
+                continue;
+            }
             let other = 1 - label;
-            if label < 2 && segments[k - 1].0 == other && segments[k + 1].0 == other {
+            if segments[k - 1].0 == other && segments[k + 1].0 == other {
                 out.push((from, length));
             }
         }
