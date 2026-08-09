@@ -1,0 +1,165 @@
+name: Release
+
+# Manual: se elige qué parte de la versión sube y el resto va solo.
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: Parte de la versión que sube.
+        type: choice
+        required: true
+        default: patch
+        options: [patch, minor, major]
+
+# `jobs.<id>.uses` ejecuta un workflow entero y no comparte job con steps
+# normales, así que esto va en tres: subir la versión, compilar, publicar.
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: rustup show active-toolchain
+
+      - name: Calcular y escribir la nueva versión
+        id: bump
+        run: |
+          set -euo pipefail
+          current=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          IFS=. read -r major minor patch <<< "$current"
+          case "${{ inputs.level }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          version="$major.$minor.$patch"
+          echo "$current -> $version"
+
+          # Sólo la primera aparición: es la del paquete, no la de una dependencia.
+          perl -pi -e 'if (!$done && s/^version = ".*"/version = "'"$version"'"/) { $done = 1 }' Cargo.toml
+          cargo update --workspace --offline
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit y etiqueta
+        id: push
+        run: |
+          set -euo pipefail
+          version="${{ steps.bump.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "release: v$version"
+          git tag "v$version"
+          git push origin HEAD --tags
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # Los tests y el paquete web, sobre el commit del bump.
+  build:
+    needs: bump
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.bump.outputs.sha }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+  binaries:
+    needs: [bump, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-latest,   target: aarch64-apple-darwin }
+          - { runner: macos-13,       target: x86_64-apple-darwin }
+          - { runner: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
+
+      # Los targets de release no van en rust-toolchain.toml: allí obligarían a
+      # cada instalación local a bajarse los cinco.
+      - name: Toolchain
+        run: |
+          rustup show active-toolchain
+          rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Compilar
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Empaquetar
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="img2svg-v${{ needs.bump.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          if [ -f "target/${{ matrix.target }}/release/img2svg.exe" ]; then
+            cp "target/${{ matrix.target }}/release/img2svg.exe" "dist/$name/"
+          else
+            cp "target/${{ matrix.target }}/release/img2svg" "dist/$name/"
+          fi
+          cp README.md "dist/$name/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$name.zip" "$name"
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bin-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [bump, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      # El paquete web va también: es la build completa del sitio, por si
+      # alguien quiere incrustarla.
+      - name: Empaquetar el web
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} release/ \;
+          tar czf "release/img2svg-v${{ needs.bump.outputs.version }}-web.tar.gz" -C artifacts/web .
+          ls -la release/
+
+      - name: Crear la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ needs.bump.outputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --title "v${{ needs.bump.outputs.version }}" \
+            --generate-notes \
+            release/*

@@ -1,18 +1,18 @@
 [package]
-name = "px2svg"
+name = "img2svg"
 version = "0.1.0"
 edition = "2021"
-description = "Convierte imágenes pixel art en SVG uniendo los píxeles en paths"
-repository = "https://github.com/jgermade/px2svg"
+description = "Convierte imágenes en SVG. Modo pixel art: detecta la rejilla y une los píxeles del mismo color en paths"
+repository = "https://github.com/jgermade/img2svg"
 autoexamples = false
 
 [lib]
-name = "px2svg"
+name = "img2svg"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "px2svg"
+name = "img2svg"
 path = "src/cli.rs"
 required-features = ["cli"]
 

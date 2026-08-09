@@ -1,7 +1,7 @@
 //! Detección de la rejilla de píxeles y reducción de la imagen.
 
 use image::{Rgba as ImgRgba, RgbaImage};
-use px2svg::grid::{self, Axis};
+use img2svg::grid::{self, Axis};
 
 /// Pinta un tablero de celdas `cell`x`cell` con un desplazamiento dado.
 fn upscaled(cells_x: u32, cells_y: u32, cell: u32, offset: u32) -> RgbaImage {

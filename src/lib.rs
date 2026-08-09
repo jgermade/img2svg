@@ -15,7 +15,7 @@
 //!     255, 0, 0, 255,   0, 0, 255, 255,
 //!     0, 0, 0, 0,       0, 0, 0, 0,
 //! ];
-//! let out = px2svg::convert_rgba(2, 2, &rgba, &px2svg::Config::default()).unwrap();
+//! let out = img2svg::convert_rgba(2, 2, &rgba, &img2svg::Config::default()).unwrap();
 //! assert_eq!(out.grid, (2, 2));
 //! assert_eq!(out.colors, 2);
 //! ```

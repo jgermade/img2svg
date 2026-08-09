@@ -1,20 +1,53 @@
+//! Línea de órdenes.
+//!
+//! El subcomando elige la **segmentación** —cómo se pasa de la imagen a un
+//! conjunto de regiones— y los ajustes que no dependen de ella van en un bloque
+//! compartido. De momento sólo existe `pixelart`; `photo`, con segmentación por
+//! clustering, entra cuando exista su motor.
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
-use px2svg::{Config, Grouping};
+use clap::{Args, Parser, Subcommand};
+use img2svg::{Config, Grouping};
 
-/// Convierte imágenes pixel art en SVG, uniendo los píxeles del mismo color en
-/// paths con el contorno mínimo.
+/// Convierte imágenes en SVG.
 #[derive(Parser)]
-#[command(name = "px2svg", version, about, long_about = None)]
-struct Args {
+#[command(name = "img2svg", version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Pixel art: detecta la rejilla y une los píxeles del mismo color en paths.
+    Pixelart(Pixelart),
+}
+
+/// Ajustes que no dependen de la segmentación.
+#[derive(Args)]
+struct Common {
     /// Imagen de entrada (png, jpeg, gif, bmp, webp).
     input: PathBuf,
 
     /// Fichero SVG de salida (por defecto, la entrada con extensión .svg).
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Color de fondo del SVG, p. ej. "#ffffff".
+    #[arg(short, long)]
+    background: Option<String>,
+
+    /// No imprime información del proceso.
+    #[arg(short, long)]
+    quiet: bool,
+}
+
+#[derive(Args)]
+struct Pixelart {
+    #[command(flatten)]
+    common: Common,
 
     /// Tamaño en píxeles reales de cada píxel del dibujo. Por defecto se detecta.
     #[arg(short, long)]
@@ -36,10 +69,6 @@ struct Args {
     #[arg(short, long)]
     pixel_size: Option<u32>,
 
-    /// Color de fondo del SVG, p. ej. "#ffffff".
-    #[arg(short, long)]
-    background: Option<String>,
-
     /// Un solo path por color, en vez de uno por bloque de píxeles contiguos.
     #[arg(short = 'm', long)]
     merge_colors: bool,
@@ -51,52 +80,57 @@ struct Args {
     /// Vacía el fondo liso y recorta el SVG a lo que queda dibujado.
     #[arg(short, long)]
     remove_background: bool,
+}
 
-    /// No imprime información del proceso.
-    #[arg(short, long)]
-    quiet: bool,
+impl Pixelart {
+    fn config(&self) -> Config {
+        Config {
+            scale: self.scale,
+            offset: self.offset.as_ref().map(|o| (o[0], o[1])),
+            tolerance: self.tolerance,
+            alpha_threshold: self.alpha_threshold,
+            pixel_size: self.pixel_size,
+            background: self.common.background.clone(),
+            grouping: if self.merge_colors {
+                Grouping::Color
+            } else {
+                Grouping::Region
+            },
+            remove_checkerboard: !self.keep_checkerboard,
+            remove_background: self.remove_background,
+        }
+    }
 }
 
 fn main() -> ExitCode {
-    let args = Args::parse();
-    match run(&args) {
+    let cli = Cli::parse();
+    let result = match &cli.command {
+        Command::Pixelart(args) => run_pixelart(args),
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("px2svg: {err}");
+            eprintln!("img2svg: {err}");
             ExitCode::FAILURE
         }
     }
 }
 
-fn run(args: &Args) -> Result<(), String> {
-    let data = std::fs::read(&args.input)
-        .map_err(|e| format!("no se pudo leer {}: {e}", args.input.display()))?;
+fn run_pixelart(args: &Pixelart) -> Result<(), String> {
+    let common = &args.common;
+    let data = std::fs::read(&common.input)
+        .map_err(|e| format!("no se pudo leer {}: {e}", common.input.display()))?;
 
-    let config = Config {
-        scale: args.scale,
-        offset: args.offset.as_ref().map(|o| (o[0], o[1])),
-        tolerance: args.tolerance,
-        alpha_threshold: args.alpha_threshold,
-        pixel_size: args.pixel_size,
-        background: args.background.clone(),
-        grouping: if args.merge_colors {
-            Grouping::Color
-        } else {
-            Grouping::Region
-        },
-        remove_checkerboard: !args.keep_checkerboard,
-        remove_background: args.remove_background,
-    };
-    let out = px2svg::convert(&data, &config).map_err(|e| e.to_string())?;
+    let out = img2svg::convert(&data, &args.config()).map_err(|e| e.to_string())?;
 
-    let path = args
+    let path = common
         .output
         .clone()
-        .unwrap_or_else(|| args.input.with_extension("svg"));
+        .unwrap_or_else(|| common.input.with_extension("svg"));
     std::fs::write(&path, &out.svg)
         .map_err(|e| format!("no se pudo escribir {}: {e}", path.display()))?;
 
-    if !args.quiet {
+    if !common.quiet {
         if let Some(found) = out.checkerboard {
             eprintln!(
                 "damero de transparencia {} / {}, casilla {:.1}x{:.1} px: {:.0}% a transparente",

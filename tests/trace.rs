@@ -1,6 +1,6 @@
 //! Trazado de contornos: bucles cerrados y regiones conexas.
 
-use px2svg::trace::{self, Point};
+use img2svg::trace::{self, Point};
 
 /// Construye una máscara a partir de un dibujo: `#` marca píxel presente.
 fn mask(rows: &[&str]) -> (Vec<bool>, usize, usize) {

@@ -1,8 +1,8 @@
 //! Retirada del fondo plano y recorte al contenido.
 
-use px2svg::background;
-use px2svg::color::Rgba;
-use px2svg::grid::PixelMap;
+use img2svg::background;
+use img2svg::color::Rgba;
+use img2svg::grid::PixelMap;
 
 const FONDO: Rgba = Rgba {
     r: 255,

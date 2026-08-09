@@ -15,7 +15,7 @@
 mod common;
 
 use common::check;
-use px2svg::{Config, Conversion, Grouping};
+use img2svg::{Config, Conversion, Grouping};
 
 /// Paleta del arte ASCII. Sólo ASCII: las filas se miden en bytes.
 fn paint(ch: char) -> Option<[u8; 4]> {
@@ -51,7 +51,7 @@ fn raster(rows: &[&str], scale: usize) -> (u32, u32, Vec<u8>) {
 /// Convierte por la vía del búfer crudo, que es la que usa la página.
 fn convert(rows: &[&str], scale: usize, config: &Config) -> Conversion {
     let (w, h, buf) = raster(rows, scale);
-    px2svg::convert_rgba(w, h, &buf, config).expect("la conversión no debe fallar")
+    img2svg::convert_rgba(w, h, &buf, config).expect("la conversión no debe fallar")
 }
 
 /// Escala forzada a 1: la rejilla se toma como dada en vez de detectarla.

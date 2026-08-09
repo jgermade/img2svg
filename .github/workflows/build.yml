@@ -1,25 +1,44 @@
-name: Publicar en GitHub Pages
+name: Build
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Reutilizable desde release.yml. El `ref` es obligatorio ahí: un workflow
+  # llamado hace checkout de la rama por defecto, así que sin él construiría el
+  # commit anterior al del bump de versión.
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+      deploy:
+        description: Publicar en GitHub Pages.
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Una publicación a la vez; las que se acumulen mientras tanto se descartan.
 concurrency:
-  group: pages
+  group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # El commit del bump vuelve a disparar `on: push`; sin esto cada release
+    # lanzaría una compilación de más que no publica nada nuevo.
+    if: >
+      github.event_name != 'push' ||
+      !startsWith(github.event.head_commit.message, 'release:')
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       # Sin acción de toolchain a propósito: la versión y los targets salen de
       # `rust-toolchain.toml`, que rustup instala solo al leerlo. Fijarlos aquí
@@ -28,6 +47,12 @@ jobs:
         run: rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Formato
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
 
       # En debug, porque release apaga los checks de desbordamiento: un `1 - x`
       # sobre un u8 que se da la vuelta pasa desapercibido en release y aquí no.
@@ -43,20 +68,32 @@ jobs:
       - name: Compilar a WebAssembly
         run: >
           wasm-pack build --release --target web
-          --out-dir docs/pkg --out-name img2svg
+          --out-dir web/pkg --out-name img2svg
           -- --no-default-features --features wasm
 
       - name: Copiar el logotipo
-        run: cp img2svg.svg docs/
+        run: cp img2svg.svg web/
+
+      # Se sube siempre, para que release.yml pueda adjuntarlo aunque no
+      # despliegue.
+      - name: Guardar el paquete web
+        uses: actions/upload-artifact@v7
+        with:
+          name: web
+          path: web/
+          retention-days: 7
 
       - uses: actions/configure-pages@v6
+        if: ${{ inputs.deploy != false }}
 
       - uses: actions/upload-pages-artifact@v5
+        if: ${{ inputs.deploy != false }}
         with:
-          path: docs
+          path: web
 
   deploy:
     needs: build
+    if: ${{ inputs.deploy != false }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages

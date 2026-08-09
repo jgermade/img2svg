@@ -1,7 +1,7 @@
 //! Detección de la cuadrícula de transparencia.
 
 use image::{Rgba as ImgRgba, RgbaImage};
-use px2svg::checker;
+use img2svg::checker;
 
 /// Damero de 8 px con un cuadrado opaco encima.
 fn sample(cell: u32, art: bool) -> RgbaImage {

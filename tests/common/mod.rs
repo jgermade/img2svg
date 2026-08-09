@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
-use px2svg::Conversion;
+use img2svg::Conversion;
 
 pub fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
