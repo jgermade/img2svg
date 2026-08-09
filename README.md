@@ -1,17 +1,17 @@
-<img src="px2svg.svg" alt="" width="96" align="right">
-
 # px2svg
 
-Convierte imágenes pixel art en SVG. En lugar de emitir un rectángulo por píxel,
-une en un `<path>` cada bloque de píxeles contiguos del mismo color, trazando su
-contorno mínimo (con sus agujeros).
+<img src="px2svg.svg" alt="" width="88" align="right">
 
-Se puede usar de tres formas: **web**, **CLI** y **biblioteca**.
+Turns pixel art into SVG. Instead of emitting one rectangle per pixel, it merges
+every contiguous block of same-coloured pixels into a single `<path>`, tracing
+its minimal outline (holes included).
+
+Three ways to use it: **web**, **CLI** and **library**.
 
 ## Web
 
-<https://jgermade.github.io/px2svg/> — la conversión ocurre entera en el
-navegador (Rust compilado a WebAssembly), la imagen no se sube a ningún sitio.
+<https://jgermade.github.io/px2svg/> — the whole conversion runs in the browser
+(Rust compiled to WebAssembly); the image is never uploaded anywhere.
 
 ## CLI
 
@@ -20,7 +20,7 @@ cargo build --release
 ./target/release/px2svg examples/sonic.png
 ```
 
-Escribe `examples/sonic.svg` e informa de lo que ha hecho:
+Writes `examples/sonic.svg` and reports what it did (the program speaks Spanish):
 
 ```
 damero de transparencia #fefefe / #dadada, casilla 40.9x40.3 px: 16% a transparente
@@ -28,81 +28,82 @@ rejilla 80x126 (celda 20.45x20.36, offset 18.09,0.14)
 43 colores, 385 paths, 1049 subtrazados -> examples/sonic.svg (30.2 KB)
 ```
 
-| Opción | Descripción |
+| Option | Description |
 | --- | --- |
-| `-o, --output <FICHERO>` | Salida (por defecto, la entrada con extensión `.svg`). |
-| `-s, --scale <N>` | Tamaño de celda en píxeles reales. Por defecto se detecta; `1` desactiva la reducción. Admite decimales. |
-| `--offset <X> <Y>` | Desplazamiento de la rejilla, si la detección falla. |
-| `-t, --tolerance <N>` | Distancia máxima para fundir dos colores (por defecto `12`; `0` los conserva todos). |
-| `-a, --alpha-threshold <N>` | Alfa mínimo para considerar visible un píxel (por defecto `128`). |
-| `-p, --pixel-size <N>` | Tamaño de render de cada píxel, en unidades SVG. |
-| `-b, --background <COLOR>` | Añade un rectángulo de fondo. |
-| `-m, --merge-colors` | Un solo path por color, en vez de uno por bloque contiguo. |
-| `-k, --keep-checkerboard` | No busca el damero de transparencia para quitarlo. |
-| `-r, --remove-background` | Vacía el fondo liso y recorta el SVG al dibujo. |
-| `-q, --quiet` | Silencia el informe. |
+| `-o, --output <FILE>` | Output file (defaults to the input with an `.svg` extension). |
+| `-s, --scale <N>` | Cell size in real pixels. Auto-detected by default; `1` disables downscaling. Accepts decimals. |
+| `--offset <X> <Y>` | Grid offset, for when detection gets it wrong. |
+| `-t, --tolerance <N>` | Maximum distance for merging two colours (default `12`; `0` keeps them all). |
+| `-a, --alpha-threshold <N>` | Minimum alpha for a pixel to count as visible (default `128`). |
+| `-p, --pixel-size <N>` | Render size of each pixel, in SVG units. |
+| `-b, --background <COLOUR>` | Adds a background rectangle. |
+| `-m, --merge-colors` | One path per colour instead of one per contiguous block. |
+| `-k, --keep-checkerboard` | Skips looking for the transparency checkerboard. |
+| `-r, --remove-background` | Clears the flat background and crops the SVG to the artwork. |
+| `-q, --quiet` | Silences the report. |
 
-Formatos de entrada: PNG, JPEG, GIF, BMP y WebP.
+Input formats: PNG, JPEG, GIF, BMP and WebP.
 
-## Biblioteca
+## Library
 
 ```rust
 let png = std::fs::read("sprite.png")?;
 let out = px2svg::convert(&png, &px2svg::Config::default())?;
-println!("{} colores en {} paths", out.colors, out.paths);
-if let Some(damero) = out.checkerboard {
-    println!("quitada la cuadrícula de {:.0} px", damero.cell.0);
+println!("{} colours in {} paths", out.colors, out.paths);
+if let Some(checkerboard) = out.checkerboard {
+    println!("removed a {:.0} px transparency grid", checkerboard.cell.0);
 }
 std::fs::write("sprite.svg", out.svg)?;
 ```
 
-`convert_rgba(width, height, &rgba, &config)` acepta píxeles ya decodificados,
-que es la vía que usa la web. Las características de Cargo separan lo que
-necesita cada consumidor:
+`convert_rgba(width, height, &rgba, &config)` takes already-decoded pixels, which
+is the path the web build uses. Cargo features keep each consumer to what it
+actually needs:
 
-| Característica | Qué añade |
+| Feature | What it pulls in |
 | --- | --- |
-| `cli` (por defecto) | El binario y los decodificadores de imagen. |
-| `formats` | Sólo los decodificadores, para `convert`. |
-| `wasm` | El enlace con JavaScript (`src/wasm.rs`). |
+| `cli` (default) | The binary and the image decoders. |
+| `formats` | Just the decoders, for `convert`. |
+| `wasm` | The JavaScript bindings (`src/wasm.rs`). |
 
-## Cómo funciona
+## How it works
 
-1. **Cuadrícula de transparencia** ([`src/checker.rs`](src/checker.rs)). Al
-   capturar la pantalla de un editor, el damero blanco/gris del fondo se queda
-   pegado como píxeles opacos. Se buscan las parejas de grises más frecuentes y,
-   de cada una, se mide si sus tiras de color miden todas lo mismo y arrancan en
-   la misma fase; gana la que más imagen cubre. Sólo se borran las casillas que
-   cuadran enteras **y cuyas vecinas alternan**: un plano blanco del dibujo —el
-   ojo de un personaje— también encaja con las casillas claras, pero las suyas no
-   alternan. Desde ahí el borrado se extiende por contigüidad.
-2. **Detección de la rejilla** ([`src/grid.rs`](src/grid.rs)). El pixel art casi
-   nunca llega a escala 1:1: un píxel del dibujo ocupa NxN píxeles reales. Los
-   saltos de color caen entonces sobre una rejilla regular, así que el gradiente
-   de la imagen es una señal periódica. Para cada periodo candidato se mide qué
-   parte de la energía del gradiente se concentra en esa frecuencia y se elige el
-   mayor periodo con buena puntuación (sus divisores describen la misma rejilla
-   partida). La fase da el desplazamiento, y el periodo puede no ser entero, así
-   que también funciona con imágenes reescaladas a un tamaño arbitrario.
-3. **Reducción**. De cada celda se muestrea sólo su parte central —esquivando el
-   antialiasing de los bordes— y se toma el color mayoritario.
-4. **Paleta** ([`src/color.rs`](src/color.rs)). Los colores casi idénticos,
-   típicos del ruido de compresión, se funden sobre el tono dominante.
-5. **Fondo** ([`src/background.rs`](src/background.rs)), sólo con
-   `--remove-background`. Se toma por fondo el color que domina el borde del
-   lienzo y se vacía entrando desde fuera, de modo que ese mismo tono encerrado
-   dentro del dibujo se conserva. Después el lienzo se recorta a lo que queda.
-6. **Trazado** ([`src/trace.rs`](src/trace.rs)). Por cada color se recogen los
-   lados que separan sus píxeles del resto, orientados de forma coherente, y se
-   encadenan hasta cerrar bucles. Cada bucle es un subtrazado; contornos y
-   agujeros conviven en el mismo `<path>` gracias a `fill-rule="evenodd"`. Los
-   vértices colineales se eliminan, de forma que una región rectangular acaba en
-   cuatro puntos.
+1. **Transparency checkerboard** ([`src/checker.rs`](src/checker.rs)). Screenshot
+   an editor and the white/grey checkerboard behind the artwork gets baked in as
+   opaque pixels. The most frequent grey pairs are collected and, for each, the
+   runs of solid colour are measured: a real grid makes them all the same length
+   and all starting in the same phase. The pair covering the most image wins.
+   Only cells that match all the way through **and whose neighbours alternate**
+   are cleared — a flat white area of the artwork (a character's eye, say) also
+   fits the light cells perfectly, but its neighbours don't alternate. From those
+   cells the erasure spreads by contiguity.
+2. **Grid detection** ([`src/grid.rs`](src/grid.rs)). Pixel art almost never
+   arrives at 1:1: one drawn pixel covers NxN real ones. Colour changes therefore
+   land on a regular grid, which makes the image gradient a periodic signal. For
+   each candidate period, the share of gradient energy concentrated at that
+   frequency is measured, and the largest well-scoring period wins (its divisors
+   describe the same grid, just subdivided). The phase gives the offset, and the
+   period need not be a whole number, so rescaled images work too.
+3. **Downscaling**. Only the middle of each cell is sampled — dodging the
+   antialiasing along the edges — and the majority colour is taken.
+4. **Palette** ([`src/color.rs`](src/color.rs)). Near-identical colours, the
+   typical signature of compression noise, collapse onto the dominant tone.
+5. **Background** ([`src/background.rs`](src/background.rs)), only with
+   `--remove-background`. The colour dominating the canvas border is taken as the
+   background and cleared by flooding inwards from outside, so the same tone
+   enclosed within the artwork survives. The canvas is then cropped to what's
+   left.
+6. **Tracing** ([`src/trace.rs`](src/trace.rs)). For each colour, the edges
+   separating its pixels from everything else are collected with a consistent
+   orientation and chained until they close into loops. Each loop is a subpath;
+   outlines and holes coexist in the same `<path>` thanks to
+   `fill-rule="evenodd"`. Collinear vertices are dropped, so a rectangular region
+   ends up as four points.
 
-## Estructura del SVG
+## SVG structure
 
-Cada bloque de píxeles contiguos es un `<path>`, y todos los bloques de un color
-van dentro de un `<g fill="…">`:
+Each contiguous block of pixels is a `<path>`, and all the blocks of one colour
+live inside a `<g fill="…">`:
 
 ```xml
 <g fill="#000000">
@@ -111,41 +112,43 @@ van dentro de un `<g fill="…">`:
 </g>
 ```
 
-Así cada figura del documento es una forma que se puede seleccionar y mover por
-separado en un editor vectorial. Con `--merge-colors` se vuelve a un único path
-por color, con todos sus bloques como subtrazados: ocupa entre un 20 y un 30%
-menos, pero seleccionar una figura selecciona todo lo que comparte su color.
+Every shape in the document can be selected and moved on its own in a vector
+editor. `--merge-colors` goes back to a single path per colour with all its
+blocks as subpaths: 20–30% smaller, but selecting one shape selects everything
+sharing its colour.
 
-Los bloques se agrupan por vecindad de 8, de forma que una diagonal de píxeles
-—omnipresente en pixel art— es una sola figura y no una ristra de cuadraditos.
+Blocks are grouped with 8-connectivity, so a diagonal run of pixels — everywhere
+in pixel art — is one shape rather than a string of little squares.
 
-El `viewBox` va en píxeles del dibujo (1 unidad = 1 píxel), y `width`/`height`
-reproducen el tamaño original de la imagen.
+The `viewBox` is in drawn pixels (1 unit = 1 pixel), and `width`/`height`
+reproduce the original image size.
 
-## Desarrollo
+## Development
 
 ```
 cargo test
-cargo build --release                     # CLI en target/release/px2svg
+cargo build --release                     # CLI at target/release/px2svg
 wasm-pack build --release --target web \
   --out-dir docs/pkg --out-name px2svg \
-  -- --no-default-features --features wasm # paquete web en docs/pkg
+  -- --no-default-features --features wasm # web package in docs/pkg
 ```
 
-Para probar la web en local basta con servir `docs/` una vez compilado el wasm:
+To try the web build locally, serve `docs/` once the wasm is compiled:
 
 ```
 python3 -m http.server 8765 --directory docs
 ```
 
-`.github/workflows/pages.yml` pasa los tests, compila el wasm y publica `docs/`
-en cada push a `main`. Requiere activar Pages en el repositorio con
+`.github/workflows/pages.yml` runs the tests, compiles the wasm and publishes
+`docs/` on every push to `main`. It needs Pages enabled on the repository under
 **Settings → Pages → Source: GitHub Actions**.
 
-Lo que se publica es `docs/` y nada más: el wasm, la página y el logotipo. Las
-imágenes de `examples/` se quedan fuera, así que la web no arrastra megas de
-PNG ni de demostración.
+What gets published is `docs/` and nothing else: the wasm, the page and the
+logo. The images under `examples/` stay out, so the site never carries megabytes
+of PNG around.
 
-Si una imagen sale mal, casi siempre es la rejilla: comprueba la celda que
-informa el programa y fíjala a mano con `--scale`. Y si el damero de
-transparencia se te lleva algo por delante, `--keep-checkerboard` lo desactiva.
+When an image comes out wrong it's nearly always the grid: check the cell size
+the program reports and pin it by hand with `--scale`. And if the checkerboard
+removal eats something it shouldn't, `--keep-checkerboard` turns it off.
+
+Source comments and program output are in Spanish.
