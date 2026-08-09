@@ -22,6 +22,8 @@
 
 pub mod background;
 pub mod checker;
+#[cfg(feature = "photo")]
+pub mod cluster;
 pub mod color;
 pub mod fit;
 pub mod grid;

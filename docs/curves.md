@@ -26,8 +26,8 @@ drawing.
 
 ## What is built so far
 
-Two pieces of colour groundwork, both under the `photo` cargo feature so the
-pixel-art wasm bundle can leave the photo code out:
+Clustering and the colour groundwork under it, all behind the `photo` cargo
+feature so the pixel-art wasm bundle can leave the photo code out:
 
 **Oklab** (`color.rs`). Clustering needs a colour distance where one threshold
 means the same thing everywhere, and the existing weighted-RGB distance is not
@@ -58,11 +58,49 @@ rounds down, so every channel loses half a level on average — four values out 
 invisible in any one colour and plain across an image, which is why the test for
 it checks the mean over the ramp rather than individual values.
 
+**Cluster segmentation** (`cluster.rs`). Three stages: quantise, build a palette
+by grouping the distinct colours in Oklab from most frequent to least, then label
+the connected components of equal palette entry.
+
+Deciding the palette *before* walking the image is what buys the guarantee worth
+having: **no pixel is painted further than `tolerance` from its own colour**. A
+clusterer that instead merges neighbouring regions as it sweeps cannot promise
+that — every merge moves the group's colour, and down a smooth ramp the chain of
+merges swallows the whole sky, which ends up one flat region matching neither of
+its ends. With the palette fixed up front the error is bounded by construction
+and does not depend on where the sweep started.
+
+The labelling works on **runs** — horizontal spans of equal palette entry — not
+on pixels. A flood fill over four million pixels is millions of stack pushes with
+no locality; merging the runs of two adjacent rows is a two-pointer walk with
+union-find. Neighbourhood is 8-connected, matching the pixel-art path, which costs
+nothing more than widening the overlap test by one column.
+
+Measured on the three corpus images at 4.2 Mpx: **250–350 ms** each, against a
+target of a couple of seconds in wasm.
+
+Two things those measurements say about what comes next. At the default tolerance
+a real image yields 18k–31k regions, and **68–77% of them are specks of 4 pixels
+or fewer** — so `filter_speckle` is not a refinement, it is what makes the output
+a usable SVG at all. And raising the tolerance does *not* reliably reduce the
+region count: past about 0.08 it starts going back up (9,409 regions at 0.08
+against 11,690 at 0.15 on one image), because with few palette entries the pixels
+along a band boundary alternate between two distant representatives and shatter
+into fragments. Fewer colours is not fewer regions. The speck filter is the
+load-bearing part, not the threshold.
+
 ## What is missing
 
-**Clustering.** Grouping a photo's colours into regions, filtering out specks,
-and banding gradients — a vector format has no cheap per-region gradient, so a
-smooth ramp has to become discrete layers on purpose.
+**Speck filtering and gradient banding.** Any region under N pixels should merge
+into its largest neighbour, which needs the `right` side of each half-edge to know
+which neighbour that is. And a vector format has no cheap per-region gradient, so
+a smooth ramp has to become discrete bands on purpose.
+
+**Boundary extraction for the photo path.** `cluster.rs` produces a labelled
+image; turning that into the half-edge IR is its own step. The grid path's
+`trace` cannot be reused as is — it rebuilds a whole-image mask per region, which
+is fine for 40 colours on a small grid and hopeless for tens of thousands of
+regions.
 
 **Bézier fitting.** Simplifying each contour, detecting the corners so they stay
 sharp, and least-squares fitting curves to the rest.
