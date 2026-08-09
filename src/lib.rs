@@ -5,10 +5,19 @@
 //! casi idénticos ([`color`]), trazar el contorno de cada región ([`trace`]) y
 //! escribir el documento ([`svg`]).
 //!
-//! ```no_run
-//! let png = std::fs::read("sprite.png").unwrap();
-//! let out = px2svg::convert(&png, &px2svg::Config::default()).unwrap();
-//! println!("{}", out.svg);
+//! Se parte de un búfer RGBA, que es la vía que siempre está disponible y la
+//! que usa la página web. Con la característica `formats`, activa por defecto,
+//! [`convert`] hace lo mismo a partir de un PNG o un JPEG ya codificados.
+//!
+//! ```
+//! // Dos píxeles opacos arriba y dos transparentes abajo.
+//! let rgba: [u8; 16] = [
+//!     255, 0, 0, 255,   0, 0, 255, 255,
+//!     0, 0, 0, 0,       0, 0, 0, 0,
+//! ];
+//! let out = px2svg::convert_rgba(2, 2, &rgba, &px2svg::Config::default()).unwrap();
+//! assert_eq!(out.grid, (2, 2));
+//! assert_eq!(out.colors, 2);
 //! ```
 
 pub mod background;

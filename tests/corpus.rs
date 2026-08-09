@@ -8,9 +8,9 @@
 //!
 //! `examples/` está en `.gitignore` y los PNG pesan 9 MB, así que **la entrada
 //! no está versionada y la salida sí**: si las imágenes no están, estos tests se
-//! saltan con un aviso en vez de fallar. La huella FNV de cada fichero va en la
-//! cabecera de la instantánea para que un cambio de entrada se distinga de una
-//! regresión del código.
+//! saltan con un aviso en vez de fallar —o fallan, si se pone `REQUIRE_CORPUS`—.
+//! La huella FNV de cada fichero va en la cabecera de la instantánea para que un
+//! cambio de entrada se distinga de una regresión del código.
 
 #![cfg(feature = "formats")]
 
@@ -32,10 +32,19 @@ fn examples_dir() -> PathBuf {
 }
 
 /// Carga una imagen del corpus, o `None` si no está disponible.
+///
+/// Saltarse un test lo deja en verde, así que sin las imágenes estos casos
+/// pasarían sin haber comprobado nada y el log de CI lo contaría como éxito. Con
+/// `REQUIRE_CORPUS` puesto, faltar es un fallo: es lo que hay que activar el día
+/// que las imágenes sean alcanzables desde un clon limpio.
 fn load(file: &str) -> Option<Vec<u8>> {
     let path = examples_dir().join(file);
     match std::fs::read(&path) {
         Ok(data) => Some(data),
+        Err(_) if std::env::var_os("REQUIRE_CORPUS").is_some() => panic!(
+            "falta {}, y REQUIRE_CORPUS exige el corpus entero",
+            path.display()
+        ),
         Err(_) => {
             eprintln!(
                 "SALTADO: falta {}.\n  \

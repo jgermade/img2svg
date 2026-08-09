@@ -27,7 +27,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # En debug, porque release apaga los checks de desbordamiento: un `1 - x`
+      # sobre un u8 que se da la vuelta pasa desapercibido en release y aquí no.
       - name: Tests
+        run: cargo test
+
+      # Y en release, que es lo que se publica.
+      - name: Tests (release)
         run: cargo test --release
 
       - uses: jetli/wasm-pack-action@v0.4.0
