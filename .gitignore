@@ -13,3 +13,6 @@
 
 # macOS
 .DS_Store
+
+# downloaded files and temporary scripts
+/.tmp/
