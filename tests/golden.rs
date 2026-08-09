@@ -110,8 +110,8 @@ const SOBRE_FONDO: &[&str] = &[
 #[test]
 fn escala_forzada_a_uno() {
     let out = convert(SPRITE, 1, &sin_detectar());
-    assert_eq!(out.grid, (16, 14), "un píxel lógico por píxel real");
-    assert_eq!(out.cell, (1.0, 1.0));
+    assert_eq!(out.canvas, (16, 14), "un píxel lógico por píxel real");
+    assert_eq!(out.cell(), Some((1.0, 1.0)));
     assert!(out.colors >= 3, "tinta, color plano y semitransparente");
     assert!(
         out.svg.contains("fill-opacity"),
@@ -127,9 +127,12 @@ fn escala_forzada_a_uno() {
 #[test]
 fn rejilla_detectada() {
     let out = convert(SPRITE, 7, &Config::default());
-    assert_eq!(out.cell.0, 7.0, "debe enganchar la rejilla en X");
-    assert_eq!(out.cell.1, 7.0, "y en Y");
-    assert_eq!(out.grid, (16, 14), "reducido a los píxeles lógicos");
+    assert_eq!(
+        out.cell(),
+        Some((7.0, 7.0)),
+        "debe enganchar la rejilla en los dos ejes"
+    );
+    assert_eq!(out.canvas, (16, 14), "reducido a los píxeles lógicos");
     check(
         "rejilla-detectada",
         &out,
@@ -150,7 +153,7 @@ fn la_escala_no_cambia_el_resultado() {
         ..GridOptions::default()
     });
     let mut forced = base.clone();
-    forced.grid_options_mut().scale = Some(1.0);
+    forced.grid_options_mut().unwrap().scale = Some(1.0);
     let forzado = convert(SPRITE, 1, &forced);
     let cinco = convert(SPRITE, 5, &base);
     let siete = convert(SPRITE, 7, &base);
@@ -164,7 +167,7 @@ fn la_escala_no_cambia_el_resultado() {
 #[test]
 fn un_path_por_color() {
     let mut config = sin_detectar();
-    config.grid_options_mut().grouping = Grouping::Color;
+    config.grid_options_mut().unwrap().grouping = Grouping::Color;
     let out = convert(SPRITE, 1, &config);
     assert_eq!(out.paths, out.colors, "un path por color, sin <g>");
     assert!(out.subpaths > out.paths, "y varios subtrazados dentro");
@@ -174,13 +177,13 @@ fn un_path_por_color() {
 #[test]
 fn fondo_retirado_y_recortado() {
     let mut config = sin_detectar();
-    config.grid_options_mut().remove_background = true;
+    config.grid_options_mut().unwrap().remove_background = true;
     let out = convert(SOBRE_FONDO, 1, &config);
     let fondo = out.background.expect("debe encontrar el fondo liso");
     assert_eq!(fondo.to_hex(), "#fafafa");
     // 15 y no 16: el recorte va a la caja de lo dibujado, y la primera columna
     // del sprite está vacía en todas las filas.
-    assert_eq!(out.grid, (15, 14), "y recortar el margen hasta el dibujo");
+    assert_eq!(out.canvas, (15, 14), "y recortar el margen hasta el dibujo");
     assert!(
         out.svg.contains("#fafafa"),
         "el bolsillo encerrado del mismo color se conserva"
@@ -198,7 +201,7 @@ fn fondo_retirado_y_recortado() {
 fn fondo_conservado() {
     let out = convert(SOBRE_FONDO, 1, &sin_detectar());
     assert!(out.background.is_none());
-    assert_eq!(out.grid, (20, 18), "el lienzo entero");
+    assert_eq!(out.canvas, (20, 18), "el lienzo entero");
     check("fondo-conservado", &out, "SOBRE_FONDO a 1x, scale = 1.0");
 }
 

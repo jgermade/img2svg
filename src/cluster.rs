@@ -74,6 +74,12 @@ pub struct ClusterOptions {
     pub filter_speckle: usize,
     /// Grosor por debajo del cual una región se funde con una vecina, aunque su
     /// área sea grande. `0` no funde nada. Ver [`crate::speckle::thickness`].
+    ///
+    /// El valor por defecto, `1.0`, es exactamente el grosor de un bloque de
+    /// `2x2`, así que se lleva **todo** lo que mida un píxel de ancho: los
+    /// rebordes de antialias, que es para lo que está, y también una línea fina
+    /// que sí fuese dibujo. En una foto los primeros son órdenes de magnitud más
+    /// numerosos; en un dibujo de línea fina, esto va a `0`.
     pub min_thickness: f64,
     /// Hasta cuánta diferencia **de luz** se funden dos colores que por lo demás
     /// son el mismo, aunque pasen de `tolerance`. `0` no relaja nada.

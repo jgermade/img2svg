@@ -5,7 +5,8 @@
 Turns images into SVG. The **pixel art** mode detects the drawing's grid and
 merges every contiguous block of same-coloured pixels into a single `<path>`,
 tracing its minimal outline, holes included — rather than emitting one rectangle
-per pixel.
+per pixel. The **photo** mode instead groups the colours into a palette and
+traces the connected regions of each entry, for images that sit on no grid.
 
 Three ways to use it: **web**, **CLI** and **library**.
 
@@ -30,7 +31,21 @@ rejilla 80x126 (celda 20.45x20.36, offset 18.09,0.14)
 ```
 
 The subcommand picks how the image is read. `pixelart` assumes a regular grid;
-`photo`, which clusters colours instead, is [not built yet](docs/curves.md).
+`photo` groups the colours into a palette and traces the connected regions of
+each entry, which is what an image without a grid needs:
+
+```sh
+./target/release/img2svg photo label.png --remove-background
+```
+
+```
+fondo #ffffff retirado y lienzo recortado
+lienzo 662x1079, 1099 regiones
+37 colores, 1099 paths, 1521 subtrazados -> label.svg (107.6 KB)
+```
+
+Both still trace axis-aligned outlines; the curve fitters are
+[not built yet](docs/curves.md).
 
 When an image comes out wrong it is nearly always the grid: check the cell size
 in the report and pin it by hand with `--scale`. Full option list in
@@ -55,7 +70,7 @@ the cargo features.
 | [docs/cli.md](docs/cli.md) | Every subcommand and option. |
 | [docs/pixelart.md](docs/pixelart.md) | How grid detection, checkerboard removal and tracing work, and the shape of the SVG they produce. |
 | [docs/library.md](docs/library.md) | Using it as a crate: entry points, `Config`, `Conversion`, cargo features. |
-| [docs/curves.md](docs/curves.md) | The planned mode for photos and smooth artwork. |
+| [docs/curves.md](docs/curves.md) | The photo mode: how its segmentation works, and the curve fitting still to come. |
 | [docs/development.md](docs/development.md) | Building, the wasm package, tests and CI. |
 
 Source comments and program output are in Spanish.

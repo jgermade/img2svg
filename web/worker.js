@@ -6,7 +6,43 @@
 // Los píxeles se envían una sola vez, al cargar la imagen, y se quedan aquí.
 // Cada cambio de ajuste manda sólo las opciones, que son cuatro números.
 
-import init, { convertRgba } from "./pkg/img2svg.js";
+import init, { convertRgba, convertPhoto } from "./pkg/img2svg.js";
+
+// Cada segmentación tiene su función y su resultado: no comparten casi ninguna
+// cifra, así que en vez de un tipo con la mitad de los campos vacíos hay dos, y
+// aquí se copia el que toca. Lo que se manda al hilo principal es un objeto
+// llano, porque el del wasm deja de ser válido en cuanto se libera.
+const ENGINES = {
+  pixelart: {
+    convert: convertRgba,
+    read: (out) => ({
+      svg: out.svg,
+      gridWidth: out.gridWidth,
+      gridHeight: out.gridHeight,
+      cellWidth: out.cellWidth,
+      cellHeight: out.cellHeight,
+      colors: out.colors,
+      paths: out.paths,
+      subpaths: out.subpaths,
+      checkerCell: out.checkerCell,
+      checkerCoverage: out.checkerCoverage,
+      background: out.background,
+    }),
+  },
+  photo: {
+    convert: convertPhoto,
+    read: (out) => ({
+      svg: out.svg,
+      canvasWidth: out.canvasWidth,
+      canvasHeight: out.canvasHeight,
+      colors: out.colors,
+      paths: out.paths,
+      subpaths: out.subpaths,
+      regions: out.regions,
+      background: out.background,
+    }),
+  },
+};
 
 /** Imagen en curso: `{ width, height, rgba }`. */
 let image = null;
@@ -36,28 +72,19 @@ self.onmessage = async ({ data }) => {
   if (kind !== "convert") return;
   if (!image) return reply(id, "error", { message: "No hay imagen cargada." });
 
+  const engine = ENGINES[data.engine];
+  if (!engine) return reply(id, "error", { message: `Modo desconocido: ${data.engine}` });
+
   try {
     await boot(id);
     reply(id, "stage", { stage: "convert" });
 
     const started = performance.now();
-    const out = convertRgba(image.width, image.height, image.rgba, data.options);
+    const out = engine.convert(image.width, image.height, image.rgba, data.options);
 
     // Se copia todo lo que hace falta antes de `free()`: el objeto vive en la
     // memoria del wasm y deja de ser válido en cuanto se libera.
-    const result = {
-      svg: out.svg,
-      gridWidth: out.gridWidth,
-      gridHeight: out.gridHeight,
-      cellWidth: out.cellWidth,
-      cellHeight: out.cellHeight,
-      colors: out.colors,
-      paths: out.paths,
-      subpaths: out.subpaths,
-      checkerCell: out.checkerCell,
-      checkerCoverage: out.checkerCoverage,
-      background: out.background,
-    };
+    const result = engine.read(out);
     out.free();
 
     reply(id, "done", { result, ms: performance.now() - started });

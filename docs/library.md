@@ -25,7 +25,7 @@ same pipeline, so they combine freely.
 
 ```rust
 pub struct Config {
-    pub segmentation: Segmentation,   // Grid(GridOptions)
+    pub segmentation: Segmentation,   // Grid(GridOptions) | Cluster(ClusterOptions)
     pub fit: Fit,                     // Pixel
     pub background: Option<String>,   // belongs to neither axis
 }
@@ -35,7 +35,7 @@ pub struct Config {
 path. To vary it:
 
 ```rust
-use img2svg::{Config, GridOptions, Grouping};
+use img2svg::{ClusterOptions, Config, GridOptions, Grouping};
 
 let config = Config::grid(GridOptions {
     tolerance: 24.0,
@@ -43,9 +43,17 @@ let config = Config::grid(GridOptions {
     ..GridOptions::default()
 });
 
-// Or tweak in place:
+// Or tweak in place. `grid_options_mut` returns `None` on any other
+// segmentation, so it is an `Option`, not a panic waiting to happen.
 let mut config = Config::default();
-config.grid_options_mut().remove_background = true;
+config.grid_options_mut().unwrap().remove_background = true;
+
+// The photo path, behind the `photo` feature:
+let config = Config::cluster(ClusterOptions {
+    tolerance: 0.06,
+    remove_background: true,
+    ..ClusterOptions::default()
+});
 ```
 
 ### `GridOptions`
@@ -61,8 +69,26 @@ config.grid_options_mut().remove_background = true;
 | `remove_checkerboard: bool` | `true` | Look for the transparency checkerboard and clear it. |
 | `remove_background: bool` | `false` | Clear the flat background and crop. |
 
-`Segmentation::Cluster` (photos) and `Fit::Polygon` / `Fit::Spline` are
-[not built yet](curves.md).
+### `ClusterOptions`
+
+Needs the `photo` feature, on by default through `cli`. Nothing here is shared
+with `GridOptions`: they are two readings of what the image is, and the numbers
+are not on the same scale. See [the curves mode](curves.md) for why each one
+exists.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `color_precision: u8` | `5` | Bits per channel the colour is cut to before grouping. |
+| `tolerance: f64` | `0.045` | Maximum Oklab distance between a colour and its palette entry. Black to white is `1.0`. |
+| `alpha_threshold: u8` | `128` | Minimum alpha for a pixel to count as visible. |
+| `filter_speckle: usize` | `4` | Area up to which a region merges into a neighbour. `0` merges nothing. |
+| `min_thickness: f64` | `1.0` | Thickness (`2 × area / perimeter`) below which a region merges into a neighbour. `1.0` is a 2×2 block, so it removes everything one pixel wide. |
+| `gradient_step: f64` | `0.0` | How much *lightness* difference is merged past the tolerance. Widens gradient bands; flattens shading. |
+| `max_colors: usize` | `0` | Cap on palette entries. `0` is no cap. Drops the tolerance guarantee. |
+| `palette: Vec<Rgba>` | empty | An imposed palette. Non-empty means exactly this palette, nothing added. |
+| `remove_background: bool` | `false` | Clear the flat background and crop. |
+
+`Fit::Polygon` and `Fit::Spline` are [not built yet](curves.md).
 
 ## The intermediate representation
 
@@ -85,24 +111,40 @@ which also needs it to know which neighbour to merge a speck into.
 ```rust
 pub struct Conversion {
     pub svg: String,
-    pub grid: (usize, usize),        // logical pixels
-    pub cell: (f64, f64),            // detected or forced cell, in real pixels
-    pub offset: (f64, f64),
+    pub canvas: (usize, usize),      // the viewBox, in the units the paths use
     pub colors: usize,
     pub paths: usize,
     pub subpaths: usize,
-    pub checkerboard: Option<checker::Checkerboard>,
     pub background: Option<color::Rgba>,
+    pub detail: Detail,
+}
+
+pub enum Detail {
+    Grid {
+        cell: (f64, f64),            // detected or forced cell, in real pixels
+        offset: (f64, f64),
+        checkerboard: Option<checker::Checkerboard>,
+    },
+    Cluster { regions: usize },
 }
 ```
 
-`checkerboard` and `background` are `Some` only when something was actually
-removed, which makes them useful for reporting:
+What means something for every segmentation is a field; what only means something
+for one is in `Detail`. `canvas` is a field rather than two names inside `Detail`
+because it is the same number either way — what goes in the `viewBox` — and it is
+not the size of the input image: the grid path reports drawn pixels rather than
+real ones, and removing the background crops on both paths.
+
+`background` is `Some` only when something was actually removed. For the grid
+data there are accessors that save writing a `match` with an arm you do not care
+about, each `None` on any other segmentation:
 
 ```rust
-if let Some(found) = out.checkerboard {
+if let Some(found) = out.checkerboard() {
     println!("removed a {:.0} px transparency grid", found.cell.0);
 }
+let cell = out.cell();       // Option<(f64, f64)>
+let offset = out.offset();   // Option<(f64, f64)>
 ```
 
 ## Errors
@@ -114,9 +156,13 @@ if let Some(found) = out.checkerboard {
 
 | Feature | What it pulls in |
 | --- | --- |
-| `cli` (default) | The binary and the image decoders. |
+| `cli` (default) | The binary, the image decoders and the photo path. |
 | `formats` | Just the decoders, for `convert`. |
+| `photo` | Cluster segmentation: `cluster`, `speckle`, `boundary` and `Segmentation::Cluster`. |
 | `wasm` | The JavaScript bindings ([`src/wasm.rs`](../src/wasm.rs)). |
+
+`photo` is separate so a pixel-art-only wasm bundle can leave the photo code out:
+whoever comes to convert a sprite has no reason to download it.
 
 The web build takes none of them except `wasm`, which is what keeps the wasm
 around 150 KB: the browser decodes, so the image codecs are half a megabyte of
@@ -129,12 +175,11 @@ cargo add img2svg --no-default-features -F formats   # plus decoders
 
 ## The JavaScript API
 
-With `--features wasm`, `wasm-pack` produces `convertRgba(width, height, data,
-options)`, where `options` is a plain object using the same keys as `Config` in
-camelCase, all optional:
+With `--features wasm`, `wasm-pack` produces one function per segmentation, each
+taking a plain object of camelCase keys, all optional:
 
 ```js
-import init, { convertRgba } from "./pkg/img2svg.js";
+import init, { convertRgba, convertPhoto } from "./pkg/img2svg.js";
 await init();
 
 const out = convertRgba(width, height, rgba, {
@@ -145,6 +190,22 @@ const out = convertRgba(width, height, rgba, {
 });
 console.log(out.svg, out.gridWidth, out.colors);
 out.free();
+
+// Adding `photo` to the features adds this one, returning a PhotoConversion.
+const photo = convertPhoto(width, height, rgba, {
+  tolerance: 0.045,
+  colorPrecision: 5,
+  filterSpeckle: 4,
+  minThickness: 1,
+  gradientStep: 0,
+  maxColors: 0,
+  removeBackground: false,
+});
+console.log(photo.svg, photo.canvasWidth, photo.regions);
+photo.free();
 ```
+
+Two functions rather than one with a `mode` key, because the two option sets do
+not overlap: each reads only its own, and the `.d.ts` says which returns what.
 
 `out` lives in wasm memory: read what you need, then call `free()`.

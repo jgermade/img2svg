@@ -337,40 +337,14 @@ input[type="range"] {
   margin-bottom: 0;
 }
 
-/* Aviso de modo sin motor */
-.notice {
-  margin-bottom: 1.15rem;
-}
-
-.notice h2 {
-  margin: 0 0 0.6rem;
-  font-size: 1.05rem;
-}
-
-.notice p,
-.notice ul {
-  margin: 0 0 0.7rem;
+/* Nota al pie de un panel: lo que el modo todavía no hace. */
+.hint {
+  margin: 0 0 1.15rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   color: var(--muted);
-  font-size: 0.89rem;
-  max-width: 68ch;
-}
-
-.notice ul {
-  padding-left: 1.1rem;
-}
-
-.notice li {
-  margin-bottom: 0.35rem;
-}
-
-.notice b {
-  color: var(--text);
-  font-weight: 500;
-}
-
-.notice-foot {
-  padding-top: 0.7rem;
-  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
 }
 
 .actions {
@@ -406,12 +380,6 @@ button.primary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
-}
-
-/* Cuando el modo no tiene motor sólo queda el original: que no se quede a media
-   anchura con un hueco al lado. */
-.panes.single {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (max-width: 620px) {

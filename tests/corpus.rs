@@ -83,23 +83,24 @@ fn damero_con_rejilla_no_entera() {
         return;
     };
     let checker = out
-        .checkerboard
+        .checkerboard()
         .expect("esta imagen trae damero de transparencia: debe encontrarlo");
     assert!(
         checker.coverage > 0.10,
         "el damero debería cubrir una parte apreciable, no {:.1}%",
         checker.coverage * 100.0
     );
-    assert_eq!(out.grid, (80, 126));
+    assert_eq!(out.canvas, (80, 126));
+    let (cell, offset) = (out.cell().unwrap(), out.offset().unwrap());
     assert!(
-        (out.cell.0 - 20.45).abs() < 0.05,
+        (cell.0 - 20.45).abs() < 0.05,
         "celda detectada {:.3}",
-        out.cell.0
+        cell.0
     );
     assert!(
-        out.offset.0 > 1.0,
+        offset.0 > 1.0,
         "la rejilla no arranca en el borde: offset {:.3}",
-        out.offset.0
+        offset.0
     );
 }
 
@@ -108,7 +109,7 @@ fn denso_muchos_colores_y_paths() {
     let Some(out) = snapshot("corpus-denso", DENSO, &Config::default()) else {
         return;
     };
-    assert_eq!(out.grid, (236, 133));
+    assert_eq!(out.canvas, (236, 133));
     assert!(out.colors > 50, "{} colores", out.colors);
     assert!(out.paths > 1000, "{} paths", out.paths);
     assert!(
@@ -122,9 +123,10 @@ fn simple_ejes_con_celda_distinta() {
     let Some(out) = snapshot("corpus-simple", SIMPLE, &Config::default()) else {
         return;
     };
-    assert_eq!(out.grid, (100, 108));
+    assert_eq!(out.canvas, (100, 108));
+    let cell = out.cell().unwrap();
     assert_ne!(
-        out.cell.0, out.cell.1,
+        cell.0, cell.1,
         "los dos ejes se detectan por separado y aquí no coinciden"
     );
 }
@@ -181,7 +183,7 @@ fn damero_conservado() {
         return;
     };
     assert!(
-        out.checkerboard.is_none(),
+        out.checkerboard().is_none(),
         "no se ha pedido buscarlo, no debe informar de él"
     );
     let quitado = snapshot("corpus-damero", DAMERO, &Config::default()).unwrap();

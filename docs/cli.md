@@ -6,8 +6,13 @@ img2svg <COMMAND>
 
 The subcommand chooses **how the image is read**, because that decision changes
 which options make sense. `pixelart` assumes the drawing sits on a regular grid
-and recovers it; `photo`, which clusters colours instead, is
-[not built yet](curves.md).
+and recovers it; `photo` groups the colours into a palette and traces the
+connected regions of each entry.
+
+Their options do not look alike because they are not measuring the same thing: a
+tolerance of `12` in pixel art is an RGB distance between two tones of a discrete
+palette, and one of `0.045` in photo is an Oklab distance inside a continuous
+gradient.
 
 ## `img2svg pixelart <INPUT>`
 
@@ -74,3 +79,54 @@ it should not have. `--keep-checkerboard` turns it off.
 **Too many or too few colours.** `--tolerance` controls how aggressively
 near-identical tones collapse together. `0` keeps every distinct colour, which on
 a noisy JPEG means thousands.
+
+## `img2svg photo <INPUT>`
+
+Groups the colours into a palette, labels the connected regions of each entry,
+merges away the ones that carry no drawing, and traces every boundary once.
+
+Takes the same [shared options](#shared-options). Its own:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-t, --tolerance <N>` | `0.045` | Maximum Oklab distance between a colour and the region that paints it. The scale is perceptual and runs 0 to 1: black to white is `1.0`. |
+| `-c, --color-precision <N>` | `5` | Bits per channel the colour is cut to before grouping. |
+| `-a, --alpha-threshold <N>` | `128` | Minimum alpha for a pixel to count as visible. |
+| `--filter-speckle <N>` | `4` | Area in pixels up to which a region merges into a neighbour. |
+| `--min-thickness <N>` | `1` | Thickness below which a region merges into a neighbour, however large its area. |
+| `--gradient-step <N>` | `0` | Widens the bands of a gradient by merging on lightness difference alone. |
+| `--max-colors <N>` | `0` | Cap on palette entries. `0` is no cap. |
+| `-r, --remove-background` | off | Clears the flat background and crops the SVG to the artwork. |
+
+### The report
+
+```
+fondo #ffffff retirado y lienzo recortado
+lienzo 662x1079, 1099 regiones
+37 colores, 1099 paths, 1521 subtrazados -> label.svg (107.6 KB)
+```
+
+The region count is the number to watch when tuning the speck filters: the colour
+count barely moves and this does.
+
+### The two knobs that surprise people
+
+**`--min-thickness` is the one nobody else has.** Thickness is `2 × area /
+perimeter`, which stays near 0.5 for a one-pixel band however long it is and
+grows as `s/2` for a compact block of side `s`. It exists because besides
+isolated dots there are bands one pixel wide along every colour boundary — the
+antialiasing fringe of the source — and a 1×8 band has eight pixels, so an area
+threshold never sees it. On one corpus image: 12,498 regions unfiltered, 4,157
+with area alone, 1,298 with both.
+
+The default of `1` is exactly the thickness of a 2×2 block, so it removes
+**everything one pixel wide**, a genuine hairline included. That is the price of
+removing the fringes, and it is worth paying on a photo, where fringes outnumber
+real one-pixel features by orders of magnitude. On fine line art, set it to `0`.
+
+**`--gradient-step` flattens shading.** It merges tones that differ only in
+lightness, leaving hue alone, so a smooth sky comes out in wider bands instead of
+many thin ones — 74 colours down to 31 at `0.15` on one image. On artwork with
+volume it does the opposite of what you want, because the shading *is* a
+lightness ramp and flattening it flattens the modelling; past about `0.15` the
+band boundaries start to mottle. Hence the default of 0.

@@ -6,7 +6,7 @@
     <title>img2svg · imágenes a SVG</title>
     <meta
       name="description"
-      content="Convierte imágenes en SVG. Modo pixel art: detecta la rejilla y une los píxeles del mismo color en paths. Todo se ejecuta en tu navegador."
+      content="Convierte imágenes en SVG. Modo pixel art: detecta la rejilla y une los píxeles del mismo color en paths. Modo foto: agrupa los colores y traza cada región. Todo se ejecuta en tu navegador."
     />
     <link rel="stylesheet" href="./style.css" />
     <link rel="icon" href="./img2svg.svg" type="image/svg+xml" />
@@ -32,16 +32,16 @@
           <span class="tab-hint">rejilla y píxeles cuadrados</span>
         </button>
         <button
-          id="tab-curves"
+          id="tab-photo"
           class="tab"
           role="tab"
           type="button"
           aria-selected="false"
-          aria-controls="panel-curves"
-          data-mode="curves"
+          aria-controls="panel-photo"
+          data-mode="photo"
         >
-          <span class="tab-name">Curvas</span>
-          <span class="tab-hint">fotos y dibujo suave</span>
+          <span class="tab-name">Foto</span>
+          <span class="tab-hint">sin rejilla, por colores</span>
         </button>
       </nav>
     </header>
@@ -190,41 +190,151 @@
           </div>
         </aside>
 
-        <!-- ---------------------------------------------------- curvas --- -->
+        <!-- ------------------------------------------------------ foto --- -->
         <aside
           class="controls"
-          id="panel-curves"
+          id="panel-photo"
           role="tabpanel"
-          aria-labelledby="tab-curves"
+          aria-labelledby="tab-photo"
           hidden
         >
-          <div class="notice">
-            <h2>El motor de curvas todavía no está</h2>
-            <p>
-              El modo pixel art da por hecho que la imagen tiene una rejilla
-              regular: la detecta, reduce la imagen a un píxel por celda y traza
-              contornos rectos. Con una foto ese supuesto no se sostiene.
-            </p>
-            <p>Las curvas necesitan dos piezas que aún no existen:</p>
-            <ul>
-              <li>
-                <b>Segmentación por clustering</b>, para agrupar los colores de
-                una foto en regiones, filtrar las motas y bandear los degradados.
-              </li>
-              <li>
-                <b>Ajuste de Béziers</b>: simplificar el contorno, detectar las
-                esquinas y ajustar curvas al resto sin abrir costuras entre
-                regiones vecinas.
-              </li>
-            </ul>
-            <p class="notice-foot">
-              La imagen que cargues se queda en memoria, así que podrás
-              convertirla en cuanto esté.
-            </p>
-          </div>
+          <label class="field">
+            <span>Tolerancia de color <b id="photoToleranceOut">0.045</b></span>
+            <input
+              id="photoTolerance"
+              type="range"
+              min="0.01"
+              max="0.2"
+              step="0.005"
+              value="0.045"
+            />
+            <small>
+              Distancia máxima entre un color y el de la región que lo pinta, en
+              una escala perceptual donde de negro a blanco hay 1.
+            </small>
+          </label>
+
+          <label class="field">
+            <span>Escalón de degradado <b id="gradientStepOut">0</b></span>
+            <input
+              id="gradientStep"
+              type="range"
+              min="0"
+              max="0.2"
+              step="0.005"
+              value="0"
+            />
+            <small>
+              Ensancha las bandas de un cielo fundiendo tonos que sólo se
+              distinguen en luz. En un dibujo con volumen aplana el sombreado.
+            </small>
+          </label>
+
+          <label class="field">
+            <span>Quitar el fondo</span>
+            <div class="row">
+              <input id="photoRemoveBackground" type="checkbox" />
+              <span class="row-label">y recortar al dibujo</span>
+            </div>
+            <small>
+              Vacía lo que toca el borde de la imagen. El mismo color encerrado
+              dentro se conserva.
+            </small>
+          </label>
+
+          <details class="advanced">
+            <summary>Ajustes avanzados</summary>
+
+            <label class="field">
+              <span>Filtro de motas <b id="filterSpeckleOut">4</b></span>
+              <input
+                id="filterSpeckle"
+                type="range"
+                min="0"
+                max="32"
+                step="1"
+                value="4"
+              />
+              <small>
+                Área hasta la que una región se funde con su vecina. Sin esto una
+                foto deja decenas de miles de paths de cuatro píxeles.
+              </small>
+            </label>
+
+            <label class="field">
+              <span>Grosor mínimo <b id="minThicknessOut">1</b></span>
+              <input
+                id="minThickness"
+                type="range"
+                min="0"
+                max="3"
+                step="0.25"
+                value="1"
+              />
+              <small>
+                Quita las bandas de un píxel que bordean cada frontera de color.
+                A 1 se lleva <b>todo</b> lo que mida un píxel de ancho, incluida
+                una línea fina de dibujo: para línea fina, ponlo a 0.
+              </small>
+            </label>
+
+            <label class="field">
+              <span>Precisión de color <b id="colorPrecisionOut">5</b></span>
+              <input
+                id="colorPrecision"
+                type="range"
+                min="2"
+                max="8"
+                step="1"
+                value="5"
+              />
+              <small>Bits por canal antes de agrupar; baja el ruido del último bit.</small>
+            </label>
+
+            <label class="field">
+              <span>Máximo de colores</span>
+              <div class="row">
+                <input id="capColors" type="checkbox" />
+                <input id="maxColors" type="number" min="2" step="1" value="16" disabled />
+              </div>
+              <small>
+                Con tope, los colores que sobran van al más cercano aunque quede
+                lejos. Menos colores no es menos regiones: suele ser más.
+              </small>
+            </label>
+
+            <label class="field">
+              <span>Umbral de alfa <b id="photoAlphaOut">128</b></span>
+              <input
+                id="photoAlpha"
+                type="range"
+                min="0"
+                max="255"
+                step="1"
+                value="128"
+              />
+              <small>Por debajo, el píxel se considera transparente.</small>
+            </label>
+
+            <label class="field">
+              <span>Fondo</span>
+              <div class="row">
+                <input id="photoUseBackground" type="checkbox" />
+                <input id="photoBackground" type="color" value="#ffffff" disabled />
+              </div>
+              <small>Sin marcar, el SVG queda con fondo transparente.</small>
+            </label>
+          </details>
+
+          <p class="hint">
+            Los contornos salen todavía a escalones: el ajuste de Béziers, que es
+            lo que convertirá cada contorno en curvas, aún no está.
+          </p>
 
           <div class="actions">
-            <button id="resetCurves" type="button">Otra imagen</button>
+            <button id="photoDownload" type="button" class="primary">Descargar SVG</button>
+            <button id="photoCopy" type="button">Copiar</button>
+            <button id="photoReset" type="button">Otra imagen</button>
           </div>
         </aside>
       </div>

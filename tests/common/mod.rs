@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
-use img2svg::Conversion;
+use img2svg::{Conversion, Detail};
 
 pub fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
@@ -34,26 +34,46 @@ fn updating() -> bool {
 /// rejilla, el número de paths) y no sólo que ha cambiado. Como es un comentario
 /// legal en el prólogo, la instantánea sigue siendo un SVG que se abre en el
 /// navegador.
+/// Lo propio de cada segmentación va **antes y después** del bloque común, en el
+/// sitio exacto que ocupaba cuando sólo existía la rejilla. Reordenar una línea
+/// movería las once instantáneas de pixel art sin que nada haya cambiado en la
+/// conversión, que es justo lo que esta red de seguridad no debe hacer.
 fn header(out: &Conversion, extra: &str) -> String {
+    let (head, tail) = match out.detail {
+        Detail::Grid {
+            cell,
+            offset,
+            checkerboard,
+        } => (
+            format!(
+                "  rejilla     {}x{}\n  celda       {:.3} x {:.3}\n  offset      {:.3}, {:.3}\n",
+                out.canvas.0, out.canvas.1, cell.0, cell.1, offset.0, offset.1
+            ),
+            format!(
+                "  damero      {}\n",
+                checkerboard.map_or(String::from("no"), |c| format!(
+                    "{:.2} x {:.2} px, {:.0}%",
+                    c.cell.0,
+                    c.cell.1,
+                    c.coverage * 100.0
+                ))
+            ),
+        ),
+        #[cfg(feature = "photo")]
+        Detail::Cluster { regions } => (
+            format!(
+                "  lienzo      {}x{}\n  regiones    {}\n",
+                out.canvas.0, out.canvas.1, regions
+            ),
+            String::new(),
+        ),
+    };
     format!(
-        "<!--\n  {extra}\n  rejilla     {}x{}\n  celda       {:.3} x {:.3}\n  \
-offset      {:.3}, {:.3}\n  colores     {}\n  paths       {}\n  subtrazados {}\n  \
-damero      {}\n  fondo       {}\n-->\n",
-        out.grid.0,
-        out.grid.1,
-        out.cell.0,
-        out.cell.1,
-        out.offset.0,
-        out.offset.1,
+        "<!--\n  {extra}\n{head}  colores     {}\n  paths       {}\n  \
+subtrazados {}\n{tail}  fondo       {}\n-->\n",
         out.colors,
         out.paths,
         out.subpaths,
-        out.checkerboard.map_or(String::from("no"), |c| format!(
-            "{:.2} x {:.2} px, {:.0}%",
-            c.cell.0,
-            c.cell.1,
-            c.coverage * 100.0
-        )),
         out.background.map_or(String::from("no"), |c| c.to_hex()),
     )
 }

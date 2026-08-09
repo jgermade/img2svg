@@ -64,7 +64,7 @@ jobs:
         run: >
           wasm-pack build --release --target web
           --out-dir web/pkg --out-name img2svg
-          -- --no-default-features --features wasm
+          -- --no-default-features --features wasm,photo
 
       - name: Copiar el logotipo
         run: cp img2svg.svg web/

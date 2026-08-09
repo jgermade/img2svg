@@ -28,7 +28,7 @@ cargo clippy --all-targets
 ```sh
 wasm-pack build --release --target web \
   --out-dir web/pkg --out-name img2svg \
-  -- --no-default-features --features wasm
+  -- --no-default-features --features wasm,photo
 
 cp img2svg.svg web/
 python3 -m http.server 8765 --directory web
@@ -37,15 +37,23 @@ python3 -m http.server 8765 --directory web
 The wasm must be served over HTTP — opening `web/index.html` from the filesystem
 will not work, because the page loads a module worker.
 
-`--no-default-features --features wasm` is deliberate: the browser decodes the
-image, so the Rust image codecs are half a megabyte of dead weight in the bundle.
+`--no-default-features` is deliberate: the browser decodes the image, so the Rust
+image codecs are half a megabyte of dead weight in the bundle.
+
+`photo` is in, so the page ships **one** bundle with both modes. Measured, it
+costs 152 KB → 209 KB raw but only 52 KB → 68 KB brotli, and the rule of thumb
+this was weighed against was written in raw bytes. Seventeen kilobytes over the
+wire does not pay for two `pkg/` directories, a loader that picks between them,
+two wasm builds in CI and two `.d.ts` files to keep an eye on. Revisit if the
+curve fitters change the shape of that.
 
 ## Tests
 
 | Suite | What it covers |
 | --- | --- |
-| `tests/checker.rs`, `grid.rs`, `trace.rs`, `background.rs` | Unit tests per module. |
-| `tests/golden.rs` | Snapshots over a synthetic ASCII sprite. Input lives in the file, so it runs anywhere. |
+| `tests/checker.rs`, `grid.rs`, `trace.rs`, `background.rs`, `color.rs`, `palette.rs`, `cluster.rs`, `speckle.rs`, `boundary.rs` | Unit tests per module. |
+| `tests/golden.rs` | Snapshots of the pixel art path over a synthetic ASCII sprite. Input lives in the file, so it runs anywhere. |
+| `tests/photo.rs` | Snapshots of the photo path over a synthetic drawing — a gradient, two flat blocks, a one-pixel line and a few loose dots, one motif per behaviour that was decided by looking at results. |
 | `tests/corpus.rs` | Snapshots over the real images in `examples/`. |
 
 ### Snapshots

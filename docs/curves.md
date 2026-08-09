@@ -1,10 +1,10 @@
 # The curves mode
 
-**The engine exists; nothing reaches it yet.** Segmentation for photos is built and
-tested in the library — clustering, speck filtering, boundary extraction,
-background removal — but `Segmentation` still has one variant, the CLI still has
-one subcommand, and the web app still shows a tab with a notice behind it. What is
-missing is the wiring and the curve fitters. This page explains why it is a
+**Half of it ships; the curves do not.** Segmentation for photos is built, tested
+and reachable from all three surfaces — `Segmentation::Cluster` in the library,
+`img2svg photo` on the CLI, the Foto tab on the page — but every contour still
+comes out as an axis-aligned staircase, because the only fitter that exists is
+`pixel`. What is missing is the curve fitters. This page explains why it is a
 separate mode rather than a flag, what is built, and what it still needs.
 
 ## Why it is not just an option
@@ -30,8 +30,11 @@ drawing.
 ## What is built so far
 
 The whole segmentation half — colour groundwork, clustering, speck filtering,
-boundaries and background removal — all behind the `photo` cargo feature so the
-pixel-art wasm bundle can leave the photo code out:
+boundaries and background removal — all behind the `photo` cargo feature, so a
+pixel-art-only build can leave it out, and all of it reachable through
+`Segmentation::Cluster`, `img2svg photo`, the Foto tab and four snapshots of its
+own in `tests/photo.rs`. (The published page ships one bundle with both: the gate
+costs 57 KB raw but only 17 KB brotli, which is not worth two builds.)
 
 **Oklab** (`color.rs`). Clustering needs a colour distance where one threshold
 means the same thing everywhere, and the existing weighted-RGB distance is not
@@ -213,7 +216,20 @@ colours, so they compress badly. The case for the speck filter stood on path
 count, not on file size, and that is how it was judged.
 
 **Bézier fitting.** Simplifying each contour, detecting the corners so they stay
-sharp, and least-squares fitting curves to the rest.
+sharp, and least-squares fitting curves to the rest. Until it lands, `photo`
+output is a staircase: correct, and three to four times the path data it needs.
+
+Two things the fitters have to touch on the way. `shape-rendering="crispEdges"`
+is hardcoded in the `<svg>` element, which is right for a pixel staircase on
+integer coordinates and would alias every Bézier — it has to become conditional
+on the fit. And tangent continuity across a node is not guaranteed: each chain is
+fitted independently, so two chains meeting at a node agree on the point but not
+on the direction. At a three-region junction that is correct, it is a real
+corner; where it will show is a node that is geometrically smooth.
+
+**Real progress on the page.** The photo path is loops over rows and regions, so
+unlike the sprite path it can report actual progress through a callback instead
+of the indeterminate bar it shows today.
 
 **Seam handling.** Two regions sharing a border must be fitted *once*, not once
 per face — otherwise the two fits disagree and a hairline of background shows
@@ -225,11 +241,11 @@ fitters are written, not after.
 
 What is left, and in what order, lives in the newest file in
 [`SESSIONS/`](../SESSIONS/) — currently
-[`2026-08-10-00h38.remaining-after-photo-segmentation.md`](../SESSIONS/2026-08-10-00h38.remaining-after-photo-segmentation.md).
+[`2026-08-10-01h40.remaining-after-wiring.md`](../SESSIONS/2026-08-10-01h40.remaining-after-wiring.md).
 The original decision is in
 [`2026-08-09-10h00.img2svg-two-axes.md`](../SESSIONS/2026-08-09-10h00.img2svg-two-axes.md);
 the files between the two record how each stage was reasoned about, including
 where it corrected the plan, and are not kept up to date on purpose.
 
-In the web app, an image you load stays in memory in the worker, so once the
-engine is wired up, switching to the tab will convert without reloading.
+In the web app, an image you load stays in memory in the worker, so switching
+tabs reconverts it without reloading anything.

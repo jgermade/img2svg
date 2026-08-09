@@ -5,15 +5,13 @@
 const $ = (id) => document.getElementById(id);
 const ui = {
   tabs: [...document.querySelectorAll(".tab")],
-  panels: { pixelart: $("panel-pixelart"), curves: $("panel-curves") },
+  panels: { pixelart: $("panel-pixelart"), photo: $("panel-photo") },
   footerNote: $("footerNote"),
 
   drop: $("drop"),
   file: $("file"),
   workspace: $("workspace"),
   preview: document.querySelector(".preview"),
-  panes: document.querySelector(".panes"),
-  svgFigure: $("result").closest("figure"),
 
   original: $("original"),
   originalSkeleton: $("originalSkeleton"),
@@ -44,10 +42,30 @@ const ui = {
   removeBackground: $("removeBackground"),
   mergeColors: $("mergeColors"),
 
+  photoTolerance: $("photoTolerance"),
+  photoToleranceOut: $("photoToleranceOut"),
+  gradientStep: $("gradientStep"),
+  gradientStepOut: $("gradientStepOut"),
+  filterSpeckle: $("filterSpeckle"),
+  filterSpeckleOut: $("filterSpeckleOut"),
+  minThickness: $("minThickness"),
+  minThicknessOut: $("minThicknessOut"),
+  colorPrecision: $("colorPrecision"),
+  colorPrecisionOut: $("colorPrecisionOut"),
+  capColors: $("capColors"),
+  maxColors: $("maxColors"),
+  photoAlpha: $("photoAlpha"),
+  photoAlphaOut: $("photoAlphaOut"),
+  photoUseBackground: $("photoUseBackground"),
+  photoBackground: $("photoBackground"),
+  photoRemoveBackground: $("photoRemoveBackground"),
+
   download: $("download"),
   copy: $("copy"),
   reset: $("reset"),
-  resetCurves: $("resetCurves"),
+  photoDownload: $("photoDownload"),
+  photoCopy: $("photoCopy"),
+  photoReset: $("photoReset"),
 };
 
 /** Metadatos de la imagen cargada; los píxeles se quedan en el worker. */
@@ -57,25 +75,38 @@ let svg = "";
 /** Id de la petición en vuelo: las respuestas viejas se descartan. */
 let request = 0;
 
+// Un modo es una segmentación: sus ajustes, el motor del worker que los lee y
+// las cifras que tienen sentido contar de lo que devuelve. `report` está aquí y
+// no en `render` porque son dos vocabularios distintos —rejilla y celda contra
+// lienzo y regiones— y mezclarlos daría una línea con la mitad vacía.
 const MODES = {
   pixelart: {
-    /** Sin `convert` no hay motor y el modo se enseña como pendiente. */
-    convert: (options) => send("convert", { options }),
     options: pixelartOptions,
+    report: pixelartReport,
     note:
       "Detecta la rejilla midiendo la periodicidad del gradiente, reduce la " +
       "imagen a sus píxeles reales y traza el contorno de cada región con " +
       '<code>fill-rule="evenodd"</code>.',
   },
-  curves: {
-    convert: null,
+  photo: {
+    options: photoOptions,
+    report: photoReport,
     note:
-      "Pendiente: segmentación por clustering para agrupar los colores de una " +
-      "foto en regiones, y ajuste de Béziers sobre sus contornos.",
+      "Agrupa los colores en una paleta por cercanía perceptual, etiqueta las " +
+      "regiones conexas de cada entrada, funde las que no dibujan nada y saca " +
+      "cada frontera una sola vez.",
   },
 };
 
-let mode = location.hash.slice(1) in MODES ? location.hash.slice(1) : "pixelart";
+/** `#curves` era el nombre de esta pestaña antes de que tuviera motor. */
+const HASH_ALIASES = { curves: "photo" };
+
+function modeFromHash() {
+  const hash = location.hash.slice(1);
+  return HASH_ALIASES[hash] || (hash in MODES ? hash : "pixelart");
+}
+
+let mode = modeFromHash();
 
 /* ----------------------------------------------------------------- worker --- */
 
@@ -224,9 +255,27 @@ function pixelartOptions() {
   return opts;
 }
 
+function photoOptions() {
+  const opts = {
+    tolerance: Number(ui.photoTolerance.value),
+    gradientStep: Number(ui.gradientStep.value),
+    filterSpeckle: Number(ui.filterSpeckle.value),
+    minThickness: Number(ui.minThickness.value),
+    colorPrecision: Number(ui.colorPrecision.value),
+    alphaThreshold: Number(ui.photoAlpha.value),
+    removeBackground: ui.photoRemoveBackground.checked,
+  };
+  if (ui.capColors.checked && Number(ui.maxColors.value) >= 2) {
+    opts.maxColors = Number(ui.maxColors.value);
+  }
+  if (ui.photoUseBackground.checked) {
+    opts.background = ui.photoBackground.value;
+  }
+  return opts;
+}
+
 function convert() {
-  const engine = MODES[mode];
-  if (!source || !engine.convert) return;
+  if (!source) return;
 
   // Si ya hay un resultado, se atenúa en vez de sustituirlo por un esqueleto:
   // ver el anterior mientras llega el nuevo se lee mucho mejor al mover un
@@ -234,27 +283,13 @@ function convert() {
   if (svg) ui.resultBox.classList.add("stale");
   else ui.resultSkeleton.hidden = false;
 
-  engine.convert(engine.options());
+  send("convert", { engine: mode, options: MODES[mode].options() });
 }
 
-function render(out, ms) {
-  svg = out.svg;
-  ui.result.innerHTML = svg;
-  ui.resultBox.classList.remove("stale");
-  ui.resultSkeleton.hidden = true;
-
+/** `{ meta, stats }`: lo que va bajo el SVG y la línea de cifras. */
+function pixelartReport(out) {
   const grid = `${out.gridWidth}×${out.gridHeight}`;
   const cell = `${out.cellWidth.toFixed(2)}×${out.cellHeight.toFixed(2)}`;
-  ui.svgMeta.textContent = `${grid} px · ${size(svg.length)}`;
-  ui.stats.textContent =
-    (out.checkerCell
-      ? `damero de ${out.checkerCell.toFixed(0)} px quitado ` +
-        `(${(out.checkerCoverage * 100).toFixed(0)}% a transparente) · `
-      : "") +
-    (out.background ? `fondo ${out.background} quitado · ` : "") +
-    `rejilla ${grid} · celda ${cell} px · ${out.colors} colores · ` +
-    `${out.paths} paths · ${percent(svg.length, source.bytes)} del original · ` +
-    `${Math.round(ms)} ms`;
 
   // Con la escala en automático, el campo manual refleja lo detectado para que
   // retocarlo a mano parta de ahí.
@@ -263,6 +298,42 @@ function render(out, ms) {
     ui.scale.value = detected.toFixed(2);
     ui.autoScaleLabel.textContent = `automática (${detected.toFixed(2)} px)`;
   }
+
+  return {
+    meta: `${grid} px`,
+    stats:
+      (out.checkerCell
+        ? `damero de ${out.checkerCell.toFixed(0)} px quitado ` +
+          `(${(out.checkerCoverage * 100).toFixed(0)}% a transparente) · `
+        : "") +
+      (out.background ? `fondo ${out.background} quitado · ` : "") +
+      `rejilla ${grid} · celda ${cell} px · ${out.colors} colores · ` +
+      `${out.paths} paths`,
+  };
+}
+
+function photoReport(out) {
+  const canvas = `${out.canvasWidth}×${out.canvasHeight}`;
+  return {
+    meta: `${canvas} px`,
+    stats:
+      (out.background ? `fondo ${out.background} quitado · ` : "") +
+      `lienzo ${canvas} · ${out.colors} colores · ` +
+      `${out.regions} regiones · ${out.paths} paths`,
+  };
+}
+
+function render(out, ms) {
+  svg = out.svg;
+  ui.result.innerHTML = svg;
+  ui.resultBox.classList.remove("stale");
+  ui.resultSkeleton.hidden = true;
+
+  const { meta, stats } = MODES[mode].report(out);
+  ui.svgMeta.textContent = `${meta} · ${size(svg.length)}`;
+  ui.stats.textContent =
+    `${stats} · ${percent(svg.length, source.bytes)} del original · ` +
+    `${Math.round(ms)} ms`;
 
   hideError();
   endProgress();
@@ -283,18 +354,14 @@ function setMode(next, { convertNow = true } = {}) {
     panel.hidden = name !== mode;
   }
 
-  // Sin motor no hay SVG que enseñar; el original se queda para que se vea que
-  // la imagen sigue cargada, a lo ancho y sin las cifras del otro modo, que no
-  // describen nada de lo que hay en pantalla.
-  const hasEngine = Boolean(MODES[mode].convert);
-  ui.svgFigure.hidden = !hasEngine;
-  ui.panes.classList.toggle("single", !hasEngine);
   ui.preview.hidden = !source;
   ui.footerNote.innerHTML = MODES[mode].note;
-  if (!hasEngine) ui.stats.textContent = "";
 
   if (location.hash.slice(1) !== mode) history.replaceState(null, "", `#${mode}`);
-  if (convertNow && hasEngine && source && !svg) convert();
+
+  // Cambiar de modo reconvierte siempre: el SVG en pantalla es el de la otra
+  // segmentación, y sus cifras describen algo que ya no se está viendo.
+  if (convertNow && source) convert();
 }
 
 /* ------------------------------------------------------------- utilidades --- */
@@ -352,7 +419,7 @@ for (const [i, tab] of ui.tabs.entries()) {
     setMode(next.dataset.mode);
   });
 }
-addEventListener("hashchange", () => setMode(location.hash.slice(1)));
+addEventListener("hashchange", () => setMode(modeFromHash()));
 
 ui.drop.addEventListener("click", () => ui.file.click());
 ui.drop.addEventListener("keydown", (e) => {
@@ -420,7 +487,9 @@ ui.removeChecker.addEventListener("change", convert);
 ui.removeBackground.addEventListener("change", convert);
 ui.mergeColors.addEventListener("change", convert);
 
-ui.download.addEventListener("click", () => {
+// Los dos paneles tienen sus propios botones —cada `<aside>` es el suyo— y
+// hacen exactamente lo mismo sobre el último SVG generado.
+function download() {
   if (!svg) return;
   const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
   const link = document.createElement("a");
@@ -428,20 +497,63 @@ ui.download.addEventListener("click", () => {
   link.download = `${source.name}.svg`;
   link.click();
   URL.revokeObjectURL(url);
-});
+}
 
-ui.copy.addEventListener("click", async () => {
+async function copy(button) {
   if (!svg) return;
   try {
     await navigator.clipboard.writeText(svg);
-    ui.copy.textContent = "¡Copiado!";
-    setTimeout(() => (ui.copy.textContent = "Copiar"), 1500);
+    button.textContent = "¡Copiado!";
+    setTimeout(() => (button.textContent = "Copiar"), 1500);
   } catch {
     fail("El navegador ha bloqueado el acceso al portapapeles.");
   }
-});
+}
 
-ui.reset.addEventListener("click", reset);
-ui.resetCurves.addEventListener("click", reset);
+ui.photoTolerance.addEventListener("input", () => {
+  ui.photoToleranceOut.textContent = ui.photoTolerance.value;
+  schedule();
+});
+ui.gradientStep.addEventListener("input", () => {
+  ui.gradientStepOut.textContent = ui.gradientStep.value;
+  schedule();
+});
+ui.filterSpeckle.addEventListener("input", () => {
+  ui.filterSpeckleOut.textContent = ui.filterSpeckle.value;
+  schedule();
+});
+ui.minThickness.addEventListener("input", () => {
+  ui.minThicknessOut.textContent = ui.minThickness.value;
+  schedule();
+});
+ui.colorPrecision.addEventListener("input", () => {
+  ui.colorPrecisionOut.textContent = ui.colorPrecision.value;
+  schedule();
+});
+ui.photoAlpha.addEventListener("input", () => {
+  ui.photoAlphaOut.textContent = ui.photoAlpha.value;
+  schedule();
+});
+ui.capColors.addEventListener("change", () => {
+  ui.maxColors.disabled = !ui.capColors.checked;
+  convert();
+});
+ui.maxColors.addEventListener("input", schedule);
+ui.photoUseBackground.addEventListener("change", () => {
+  ui.photoBackground.disabled = !ui.photoUseBackground.checked;
+  convert();
+});
+ui.photoBackground.addEventListener("input", schedule);
+ui.photoRemoveBackground.addEventListener("change", convert);
+
+for (const button of [ui.download, ui.photoDownload]) {
+  button.addEventListener("click", download);
+}
+for (const button of [ui.copy, ui.photoCopy]) {
+  button.addEventListener("click", () => copy(button));
+}
+for (const button of [ui.reset, ui.photoReset]) {
+  button.addEventListener("click", reset);
+}
 
 setMode(mode, { convertNow: false });

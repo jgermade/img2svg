@@ -16,7 +16,7 @@
 //!     0, 0, 0, 0,       0, 0, 0, 0,
 //! ];
 //! let out = img2svg::convert_rgba(2, 2, &rgba, &img2svg::Config::default()).unwrap();
-//! assert_eq!(out.grid, (2, 2));
+//! assert_eq!(out.canvas, (2, 2));
 //! assert_eq!(out.colors, 2);
 //! ```
 
@@ -48,6 +48,8 @@ use image::RgbaImage;
 use crate::color::Rgba;
 use crate::grid::{Axis, PixelMap};
 
+#[cfg(feature = "photo")]
+pub use crate::cluster::ClusterOptions;
 pub use crate::fit::Fit;
 pub use crate::segment::Grouping;
 
@@ -74,15 +76,31 @@ impl Config {
         }
     }
 
-    /// Las opciones de rejilla, para leerlas o retocarlas.
-    pub fn grid_options(&self) -> &GridOptions {
-        let Segmentation::Grid(options) = &self.segmentation;
-        options
+    /// Configuración de foto con el ajuste por defecto.
+    #[cfg(feature = "photo")]
+    pub fn cluster(options: ClusterOptions) -> Self {
+        Config {
+            segmentation: Segmentation::Cluster(options),
+            ..Config::default()
+        }
     }
 
-    pub fn grid_options_mut(&mut self) -> &mut GridOptions {
-        let Segmentation::Grid(options) = &mut self.segmentation;
-        options
+    /// Las opciones de rejilla, para leerlas o retocarlas, o `None` si esta
+    /// configuración no es de rejilla.
+    pub fn grid_options(&self) -> Option<&GridOptions> {
+        match &self.segmentation {
+            Segmentation::Grid(options) => Some(options),
+            #[cfg(feature = "photo")]
+            Segmentation::Cluster(_) => None,
+        }
+    }
+
+    pub fn grid_options_mut(&mut self) -> Option<&mut GridOptions> {
+        match &mut self.segmentation {
+            Segmentation::Grid(options) => Some(options),
+            #[cfg(feature = "photo")]
+            Segmentation::Cluster(_) => None,
+        }
     }
 }
 
@@ -91,7 +109,10 @@ impl Config {
 pub enum Segmentation {
     /// Pixel art: se detecta la rejilla y se reduce la imagen a ella.
     Grid(GridOptions),
-    // Cluster(ClusterOptions) entra con la segmentación para fotos.
+    /// Foto: se agrupan los colores en una paleta y se etiquetan las regiones
+    /// conexas de cada entrada. Ver [`cluster`].
+    #[cfg(feature = "photo")]
+    Cluster(ClusterOptions),
 }
 
 impl Default for Segmentation {
@@ -139,26 +160,83 @@ impl Default for GridOptions {
     }
 }
 
-/// Resultado de la conversión, con los datos de la rejilla usada.
+/// Resultado de la conversión.
+///
+/// Lo que vale para cualquier segmentación va en los campos; lo que sólo
+/// significa algo en una va en [`Detail`].
 #[derive(Clone, Debug)]
 pub struct Conversion {
     pub svg: String,
-    /// Tamaño de la rejilla, en píxeles del dibujo.
-    pub grid: (usize, usize),
-    /// Tamaño de celda detectado o forzado, en píxeles reales.
-    pub cell: (f64, f64),
-    /// Desplazamiento de la rejilla, en píxeles reales.
-    pub offset: (f64, f64),
+    /// Tamaño del lienzo, en las unidades del `viewBox`.
+    ///
+    /// No es el de la imagen de entrada: la rejilla lo da en píxeles del dibujo
+    /// y no en píxeles reales, y quitar el fondo recorta por los dos caminos.
+    ///
+    /// Va aquí y no en `Detail` aunque el plan lo pusiera dentro: es el mismo
+    /// dato para las dos segmentaciones —lo que se escribe en el `viewBox`— y
+    /// duplicarlo con dos nombres obligaría a la página, al CLI y a las
+    /// instantáneas a preguntar primero de qué modo vienen para leer un número
+    /// que significa lo mismo en ambos.
+    pub canvas: (usize, usize),
     /// Colores distintos tras fundir los parecidos.
     pub colors: usize,
     /// Elementos `<path>` del documento.
     pub paths: usize,
     /// Subtrazados emitidos, sumando todos los paths.
     pub subpaths: usize,
-    /// El damero de transparencia encontrado, si lo había.
-    pub checkerboard: Option<checker::Checkerboard>,
     /// El color de fondo retirado, si se pidió quitarlo y había uno.
     pub background: Option<Rgba>,
+    /// Lo propio de cada segmentación.
+    pub detail: Detail,
+}
+
+/// Los datos que sólo tienen sentido en una de las segmentaciones.
+#[derive(Clone, Debug)]
+pub enum Detail {
+    Grid {
+        /// Tamaño de celda detectado o forzado, en píxeles reales.
+        cell: (f64, f64),
+        /// Desplazamiento de la rejilla, en píxeles reales.
+        offset: (f64, f64),
+        /// El damero de transparencia encontrado, si lo había.
+        checkerboard: Option<checker::Checkerboard>,
+    },
+    #[cfg(feature = "photo")]
+    Cluster {
+        /// Regiones conexas emitidas. Es el número que hay que mirar al tocar el
+        /// filtrado de motas: los colores casi no se mueven y esto sí.
+        regions: usize,
+    },
+}
+
+/// Accesos a los datos de rejilla, que devuelven `None` en cualquier otro modo.
+///
+/// Existen para que quien sólo quiere la celda no tenga que escribir un `match`
+/// con un brazo que no le importa.
+impl Conversion {
+    pub fn cell(&self) -> Option<(f64, f64)> {
+        match self.detail {
+            Detail::Grid { cell, .. } => Some(cell),
+            #[cfg(feature = "photo")]
+            Detail::Cluster { .. } => None,
+        }
+    }
+
+    pub fn offset(&self) -> Option<(f64, f64)> {
+        match self.detail {
+            Detail::Grid { offset, .. } => Some(offset),
+            #[cfg(feature = "photo")]
+            Detail::Cluster { .. } => None,
+        }
+    }
+
+    pub fn checkerboard(&self) -> Option<checker::Checkerboard> {
+        match self.detail {
+            Detail::Grid { checkerboard, .. } => checkerboard,
+            #[cfg(feature = "photo")]
+            Detail::Cluster { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -228,8 +306,11 @@ pub fn convert_image(img: &RgbaImage, config: &Config) -> Result<Conversion, Err
     if w == 0 || h == 0 {
         return Err(Error::EmptyImage);
     }
-    let Segmentation::Grid(options) = &config.segmentation;
-    convert_grid(img, options, config)
+    match &config.segmentation {
+        Segmentation::Grid(options) => convert_grid(img, options, config),
+        #[cfg(feature = "photo")]
+        Segmentation::Cluster(options) => Ok(convert_cluster(img, options, config)),
+    }
 }
 
 fn convert_grid(
@@ -285,15 +366,52 @@ fn convert_grid(
 
     Ok(Conversion {
         svg: out.svg,
-        grid: (map.width, map.height),
-        cell: (ax.cell, ay.cell),
-        offset: (ax.offset, ay.offset),
+        canvas: (map.width, map.height),
         colors: out.colors,
         paths: out.paths,
         subpaths: out.subpaths,
-        checkerboard,
         background: removed_background,
+        detail: Detail::Grid {
+            cell: (ax.cell, ay.cell),
+            offset: (ax.offset, ay.offset),
+            checkerboard,
+        },
     })
+}
+
+/// La otra segmentación: paleta y regiones conexas, sin rejilla ninguna.
+///
+/// Son dos llamadas porque el trabajo está en [`cluster`] y [`boundary`]: aquí
+/// sólo se encadenan y se rellena el resultado. Nada del camino de rejilla —el
+/// damero, la celda, el `pixel_size` que sigue a la escala detectada— aparece,
+/// que es justo lo que quiere decir que sean dos ejes y no dos programas.
+#[cfg(feature = "photo")]
+fn convert_cluster(img: &RgbaImage, options: &ClusterOptions, config: &Config) -> Conversion {
+    let clustering = cluster::from_image(img, options);
+    let regions = boundary::from_clustering(&clustering);
+
+    // Una unidad del `viewBox` es un píxel de la imagen, así que el SVG sale a
+    // tamaño natural. En rejilla hay una escala que recuperar y aquí no.
+    let out = svg::render(
+        &regions,
+        &svg::Options {
+            pixel_size: 1,
+            background: config.background.clone(),
+            fit: config.fit,
+        },
+    );
+
+    Conversion {
+        svg: out.svg,
+        canvas: (regions.width, regions.height),
+        colors: out.colors,
+        paths: out.paths,
+        subpaths: out.subpaths,
+        background: clustering.background,
+        detail: Detail::Cluster {
+            regions: regions.regions.len(),
+        },
+    }
 }
 
 /// Funde los colores parecidos del mapa según la tolerancia indicada.
