@@ -151,6 +151,22 @@ impl Oklab {
         let dalpha = f64::from(self.alpha - other.alpha);
         (dl * dl + da * da + db * db + dalpha * dalpha).sqrt()
     }
+
+    /// Cuánta de esa distancia es sólo luz.
+    pub fn lightness_gap(&self, other: &Oklab) -> f64 {
+        f64::from(self.l - other.l).abs()
+    }
+
+    /// Y cuánta es todo lo demás: tono, saturación y alfa.
+    ///
+    /// Separar las dos es lo que permite bandear un degradado sin fundir tonos
+    /// distintos, que sobre tres canales de RGB no se puede ni plantear.
+    pub fn chroma_distance(&self, other: &Oklab) -> f64 {
+        let da = f64::from(self.a - other.a);
+        let db = f64::from(self.b - other.b);
+        let dalpha = f64::from(self.alpha - other.alpha);
+        (da * da + db * db + dalpha * dalpha).sqrt()
+    }
 }
 
 #[cfg(feature = "photo")]

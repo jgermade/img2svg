@@ -46,6 +46,7 @@ use std::collections::HashMap;
 
 use image::RgbaImage;
 
+use crate::background;
 use crate::color::{Oklab, Rgba};
 use crate::speckle;
 
@@ -74,6 +75,29 @@ pub struct ClusterOptions {
     /// Grosor por debajo del cual una región se funde con una vecina, aunque su
     /// área sea grande. `0` no funde nada. Ver [`crate::speckle::thickness`].
     pub min_thickness: f64,
+    /// Hasta cuánta diferencia **de luz** se funden dos colores que por lo demás
+    /// son el mismo, aunque pasen de `tolerance`. `0` no relaja nada.
+    ///
+    /// Es la respuesta al degradado. Un SVG no tiene degradado por región, así que
+    /// una rampa suave sale por fuerza a escalones, y lo que se elige aquí es lo
+    /// anchos que son. Subir `tolerance` también los ensancharía, pero de paso
+    /// fundiría tonos distintos que están cerca; esto ensancha **sólo** a lo largo
+    /// del eje de la luz y deja el tono donde estaba. Ver
+    /// [`Oklab::chroma_distance`].
+    pub gradient_step: f64,
+    /// Entradas máximas de la paleta. `0` no pone tope.
+    ///
+    /// Con tope, los colores que sobran van a la entrada más cercana **sin límite
+    /// de distancia**: el orden de la agrupación es por frecuencia, así que las
+    /// entradas que se quedan son las de los colores más presentes.
+    pub max_colors: usize,
+    /// Paleta impuesta. Si no está vacía es exactamente la paleta que se usa: no
+    /// se crea ninguna entrada más y cada color va a la más cercana, también sin
+    /// límite de distancia.
+    pub palette: Vec<Rgba>,
+    /// Vaciar el fondo liso y recortar a lo que queda dibujado.
+    /// Ver [`crate::background::remove_clustered`].
+    pub remove_background: bool,
 }
 
 impl Default for ClusterOptions {
@@ -84,6 +108,13 @@ impl Default for ClusterOptions {
             alpha_threshold: 128,
             filter_speckle: 4,
             min_thickness: 1.0,
+            // Apagado: bandear es una decisión de estilo, y de las que se toman
+            // mirando el resultado. Lo que hace por defecto la tolerancia ya
+            // reparte una rampa en escalones; esto los ensancha a propósito.
+            gradient_step: 0.0,
+            max_colors: 0,
+            palette: Vec::new(),
+            remove_background: false,
         }
     }
 }
@@ -111,6 +142,8 @@ pub struct Clustering {
     /// Entradas de la paleta, que no tiene por qué coincidir con el número de
     /// regiones: un color suele aparecer en varias partes de la imagen.
     pub colors: usize,
+    /// El color de fondo retirado, si se pidió quitarlo y había uno.
+    pub background: Option<Rgba>,
 }
 
 /// Segmenta una imagen ya decodificada.
@@ -180,11 +213,20 @@ pub fn from_image(img: &RgbaImage, options: &ClusterOptions) -> Clustering {
     }
 
     let mut clustering = finish(labels, w, h, &mut sets, &run_color);
+
+    // Las motas primero y el fondo después, y no al revés: una mota que estaba
+    // sobre el fondo se funde con él y desaparece con él. Quitando el fondo antes,
+    // esa misma mota se queda rodeada de transparencia, sin vecina en la que
+    // fundirse, y sobrevive como un punto flotando en el vacío.
     speckle::filter(
         &mut clustering,
         options.filter_speckle,
         options.min_thickness,
     );
+    if options.remove_background {
+        background::remove_clustered(&mut clustering);
+        background::trim_clustered(&mut clustering);
+    }
     clustering
 }
 
@@ -281,6 +323,7 @@ pub(crate) fn gather(
         labels,
         clusters,
         colors: weight.len(),
+        background: None,
     }
 }
 
@@ -320,21 +363,41 @@ impl Palette {
         let mut distinct: Vec<(Rgba, usize)> = counts.into_iter().collect();
         distinct.sort_by(|a, b| b.1.cmp(&a.1).then(order_key(a.0).cmp(&order_key(b.0))));
 
-        let mut entries: Vec<(Rgba, Oklab)> = Vec::new();
+        // Con paleta impuesta las entradas están dadas y no se crea ninguna más;
+        // si no, se van fundando por el camino.
+        let fixed = !options.palette.is_empty();
+        let mut entries: Vec<(Rgba, Oklab)> = options
+            .palette
+            .iter()
+            .map(|&color| (color, Oklab::from(color)))
+            .collect();
         let mut representative = HashMap::with_capacity(distinct.len());
 
         for (color, _) in distinct {
             let lab = Oklab::from(color);
+            // Se puede fundar una entrada nueva mientras no haya paleta impuesta
+            // ni se haya llegado al tope.
+            let can_add = !fixed && (options.max_colors == 0 || entries.len() < options.max_colors);
             let near = entries
                 .iter()
-                .map(|&(entry, entry_lab)| (entry, lab.distance(&entry_lab)))
-                .filter(|&(_, d)| d <= options.tolerance)
+                .map(|&(entry, entry_lab)| (entry, lab.distance(&entry_lab), entry_lab))
+                .filter(|&(_, d, entry_lab)| {
+                    // Dentro de la tolerancia, o sólo más lejos en luz de lo que
+                    // `gradient_step` permite ensanchar la banda.
+                    !can_add
+                        || d <= options.tolerance
+                        || (lab.chroma_distance(&entry_lab) <= options.tolerance
+                            && lab.lightness_gap(&entry_lab) <= options.gradient_step)
+                })
                 .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(entry, _)| entry);
+                .map(|(entry, _, _)| entry);
 
             let entry = match near {
                 Some(entry) => entry,
                 None => {
+                    // Sin candidata y sin poder fundar: sólo pasa si la paleta
+                    // impuesta está vacía, y entonces `fixed` es falso.
+                    debug_assert!(can_add, "ningún destino para {color:?}");
                     entries.push((color, lab));
                     color
                 }

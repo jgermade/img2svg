@@ -112,6 +112,25 @@ Two details worth knowing before editing these:
   default branch, so without it the release would build the commit *before* the
   version bump.
 
+## Session notes
+
+`SESSIONS/` holds the design record: what was decided, why, and what it corrected
+about the previous plan. One file per working session, named
+
+```
+YYYY-MM-DD-HHhMM.slug.md
+```
+
+The time is when the document was written, not when it was last edited, so a
+document that keeps getting updated keeps its name. Sorting by filename therefore
+sorts chronologically, which matters because several can land on one day, and the
+newest one is the live list — each says at the top which of its predecessors it
+supersedes.
+
+They are **history, not documentation**: an older file records what was true when
+it was written and is deliberately not corrected afterwards. Anything meant to stay
+true belongs in `docs/`.
+
 ## Language
 
 Source comments, test names and program output are in Spanish. Documentation —

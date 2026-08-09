@@ -1,8 +1,11 @@
 # The curves mode
 
-**Not built yet.** The web app shows the tab and the CLI will grow a `photo`
-subcommand; neither has an engine behind it. This page explains why it is a
-separate mode rather than a flag, and what it needs.
+**The engine exists; nothing reaches it yet.** Segmentation for photos is built and
+tested in the library — clustering, speck filtering, boundary extraction,
+background removal — but `Segmentation` still has one variant, the CLI still has
+one subcommand, and the web app still shows a tab with a notice behind it. What is
+missing is the wiring and the curve fitters. This page explains why it is a
+separate mode rather than a flag, what is built, and what it still needs.
 
 ## Why it is not just an option
 
@@ -26,8 +29,9 @@ drawing.
 
 ## What is built so far
 
-Clustering and the colour groundwork under it, all behind the `photo` cargo
-feature so the pixel-art wasm bundle can leave the photo code out:
+The whole segmentation half — colour groundwork, clustering, speck filtering,
+boundaries and background removal — all behind the `photo` cargo feature so the
+pixel-art wasm bundle can leave the photo code out:
 
 **Oklab** (`color.rs`). Clustering needs a colour distance where one threshold
 means the same thing everywhere, and the existing weighted-RGB distance is not
@@ -148,11 +152,58 @@ One thing it deliberately does not do: a speck with no visible neighbour stays.
 That is a lone dot on transparency, and the alternative is punching a hole where
 there was drawing.
 
-## What is missing
+**Gradient banding, a colour cap, and a fixed palette.** A vector format has no
+cheap per-region gradient, so a smooth ramp has to come out as steps; what
+`gradient_step` chooses is how wide those steps are. Raising `tolerance` would
+widen them too, but it would also merge distinct hues that happen to be close —
+this widens **only along the lightness axis** and leaves hue where it was, which
+is what having lightness on its own axis was for and cannot be expressed over
+three RGB channels.
 
-**Gradient banding.** A vector format has no cheap per-region gradient, so a
-smooth ramp has to become discrete bands on purpose — quantise `Oklab.l` before
-the palette is built, which is what having lightness on its own axis was for.
+Measured, with the honest caveat first: it does what it says, and on shaded
+artwork what it says is not what you want. At 0.05 it merges a spike's dark
+shading into the body — the modelling flattens — and at 0.15 mottling appears
+along band boundaries, the same fragmentation that raising the tolerance causes.
+It is the tool for a smooth sky, not for a drawing with volume, which is why the
+default is 0.
+
+| setting | colours | regions | SVG |
+| --- | --- | --- | --- |
+| default | 74 | 1,298 | 117 KB |
+| `gradient_step` 0.05 | 59 | 1,218 | 114 KB |
+| `gradient_step` 0.15 | 31 | 787 | 112 KB |
+| `max_colors` 16 | 16 | 1,043 | 103 KB |
+
+Note the last row against the third: 16 colours give *more* regions than 31 do.
+Fewer colours is not fewer regions — the same lesson the tolerance sweep taught.
+
+`max_colors` caps the palette; the colours that do not fit go to the nearest entry
+with no distance limit, and since the grouping runs in frequency order the entries
+that survive are the most present ones. A non-empty `palette` is exactly the
+palette: nothing is added and every colour goes to its nearest entry. Both drop
+the "within `tolerance`" guarantee by construction, which is the point of asking
+for them.
+
+**Background removal.** `remove_background` empties the flat background and crops
+to what is left, as the pixel-art path already did. On a label image it needs no
+flood fill: the regions *are* connected blocks of one colour, so "what comes in
+from outside" is exactly "the regions touching the border", and the same colour
+enclosed inside the drawing stays because it is a different region. On the corpus
+image the white background goes and the canvas crops from 992×1079 to 662×1079.
+
+Specks are filtered *before* the background is removed, and the order matters: a
+speck sitting on the background merges into it and disappears with it. The other
+way round it would be left surrounded by transparency, with no neighbour to merge
+into, and would survive as a dot floating in the void.
+
+One correction to the plan, which asked for a colour *tolerance* here on the
+grounds that exact comparison "never matches on a photo": it is not needed. Both
+paths unify near-equal colours before this runs — `reduce_palette` on the grid
+side, the palette on the clustering side — so by the time the background is looked
+for it is one exact colour. Comparing by equality is not an inherited limitation;
+the work is already done upstream.
+
+## What is missing
 
 One prediction in the plan turns out not to hold, and it is worth correcting
 rather than repeating: unfiltered specks were supposed to make the SVG *bigger
@@ -172,10 +223,13 @@ fitters are written, not after.
 
 ## Status
 
-Design and staged plan live in
-[`SESSIONS/2026-08-09.img2svg-two-axes.md`](../SESSIONS/2026-08-09.img2svg-two-axes.md)
-and
-[`SESSIONS/2026-08-09.remaining-work.md`](../SESSIONS/2026-08-09.remaining-work.md).
+What is left, and in what order, lives in the newest file in
+[`SESSIONS/`](../SESSIONS/) — currently
+[`2026-08-10-00h38.remaining-after-photo-segmentation.md`](../SESSIONS/2026-08-10-00h38.remaining-after-photo-segmentation.md).
+The original decision is in
+[`2026-08-09-10h00.img2svg-two-axes.md`](../SESSIONS/2026-08-09-10h00.img2svg-two-axes.md);
+the files between the two record how each stage was reasoned about, including
+where it corrected the plan, and are not kept up to date on purpose.
 
 In the web app, an image you load stays in memory in the worker, so once the
-engine lands, switching to the tab will convert without reloading.
+engine is wired up, switching to the tab will convert without reloading.
