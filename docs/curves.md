@@ -1,12 +1,10 @@
 # The curves mode
 
-**Segmentation ships, and so does the first fitter; the curves do not.**
-Segmentation for photos is built, tested and reachable from all three surfaces —
-`Segmentation::Cluster` in the library, `img2svg photo` on the CLI, the Foto tab
-on the page — and contours no longer have to come out as staircases: `--fit
-polygon` straightens them into segments. What is missing is the *curve* fitter.
-This page explains why it is a separate mode rather than a flag, what is built,
-and what it still needs.
+**Both axes ship.** Segmentation for photos is built, tested and reachable from
+all three surfaces — `Segmentation::Cluster` in the library, `img2svg photo` on
+the CLI, the Foto tab on the page — and so are all three fitters: `pixel`,
+`polygon` and `spline`. This page explains why it is a separate axis rather than
+a flag, and what each part is for.
 
 ## Why it is not just an option
 
@@ -20,7 +18,7 @@ So `img2svg` has two orthogonal axes, the same decomposition VTracer uses:
 | --- | --- |
 | `grid` — the pixel art path above | `pixel` — the literal staircase, `h`/`v` |
 | `cluster` — colour clustering, for photos | `polygon` — simplified straight segments |
-| | `spline` — cubic Béziers, *not built* |
+| | `spline` — cubic Béziers |
 
 They compose. The interesting one is **`grid` + `spline`**: vectorising a sprite
 with smooth curves *after* recovering the grid, so the curves follow the art
@@ -270,43 +268,110 @@ side, the palette on the clustering side — so by the time the background is lo
 for it is one exact colour. Comparing by equality is not an inherited limitation;
 the work is already done upstream.
 
-## What is missing
+**Bézier fitting** (`fit/spline.rs`). Schneider's method: split the contour at
+its corners, chord-length parameterise each piece, least-squares fit a cubic with
+the end tangents held fixed, reparameterise, and subdivide at the worst point
+while it still misses. Straight runs come back out as lines — a cubic costs six
+numbers and a line two, and the canvas border has no business being a curve.
 
-One prediction in the plan turns out not to hold, and it is worth correcting
-rather than repeating: unfiltered specks were supposed to make the SVG *bigger
-than the PNG*. Measured, it comes out at 0.2–0.6× the PNG — but only because
-these particular PNGs are pathologically noisy pixel art with 64k–159k distinct
-colours, so they compress badly. The case for the speck filter stood on path
-count, not on file size, and that is how it was judged.
+**It does not make files smaller, and it was expected to.** Measured against the
+polygon at the same tolerance it is bigger on every input tried, including the
+ones it should suit:
 
-**Bézier fitting.** Detecting the corners so they stay sharp, estimating
-tangents, and least-squares fitting cubics to the rest, subdividing at the worst
-point. The polygon fitter got the plumbing right — per half-edge, endpoints
-fixed, `crispEdges` off the moment the contour is not axis-aligned — so what is
-left is the mathematics.
+| | polygon | spline |
+| --- | --- | --- |
+| corpus photo, tol 1.5 | 84.6 KB | 103 KB |
+| corpus sprite via `pixelart`, tol 1.5 | 16.8 KB | 18.7 KB |
+| three flat overlapping discs, tol 1.5 | 1,033 B | 1,281 B |
 
-One thing it will still have to solve on its own: tangent continuity across a
-node is not guaranteed. Each chain is fitted independently, so two chains meeting
-at a node agree on the point but not on the direction. At a three-region junction
-that is correct, it is a real corner; where it will show is a node that is
-geometrically smooth. The fix, if it turns out to matter, is to estimate the
-tangent at shared nodes once and hand it to both chains as a constraint — which
-the half-edge IR already makes possible, since both chains are right there.
+That is not a defect to be tuned away, it is arithmetic: a cubic replaces a
+handful of segments but costs three times the numbers each. What the spline buys
+is that **the outline stays smooth however far you zoom**, where a polygon's
+facets are baked into the file at the tolerance you picked. That is the reason to
+choose it, and the only one.
 
-**Real progress on the page.** The photo path is loops over rows and regions, so
-unlike the sprite path it can report actual progress through a callback instead
-of the indeterminate bar it shows today.
+At their *own* defaults the two land in the same place — 105.6 KB for `polygon`
+at 0.75 against 103.2 KB for `spline` at 1.5 on the corpus photo — but that is
+the larger tolerance paying for the extra numbers, not the curves being cheaper.
+Compare like for like and the row above is what happens.
 
-**Seam handling** is done, and it turned out to be a matter of *when* as much as
-of *what*: the half-edge IR was the right type from the start, and the fitting
-stage was still about to undo it by simplifying assembled rings. See the polygon
-fitter above.
+**It needs a larger tolerance than the polygon, and gets its own default: 1.5.**
+The contour it starts from is a lattice staircase, so it arrives with its own
+error already in it — a step sits up to 0.707 from the smooth shape it stands
+for. The polygon never notices, because its vertices *are* lattice corners and at
+tolerance 0 it reproduces the staircase exactly. A curve has to pass near all
+those steps at once, and below 1.0 it chases them: it subdivides, fails again,
+and ends up emitting line after line. On a digitised circle of radius 30:
+
+| tolerance | segments | SVG |
+| --- | --- | --- |
+| 0.75 | 2 curves + 108 lines | 618 B |
+| 1.0 | 6 + 36 | 472 B |
+| 1.25 | 14 + 12 | 568 B |
+| **1.5 (default)** | **4 + 4** | **290 B** |
+| 3.0 | 4 + 4 | 290 B |
+
+`--fit-tolerance` therefore has no fixed default any more: it takes the one
+belonging to the fitter you named, and the page resets the slider when you switch
+between them.
+
+**Corners stay sharp**, which is what separates a usable curve fitter from one
+that turns every drawing into a blob. A vertex is a corner when the contour turns
+more than 60° across a four-pixel window: a rectangle's right angle reads as 90°,
+a 45° staircase reads as 0°, and there is room to spare between them.
+
+**Where the plan said the kink would be, and where it actually is.** Three
+successive notes carried the same worry — that tangents are not shared across a
+node, so a node that is geometrically smooth would show a kink. It is nearly a
+non-issue: a node is a lattice corner where *three or four* regions meet, which
+is a genuine corner essentially every time.
+
+The real case was two lines further down in `boundary.rs`. A loop that passes
+through no node — an isolated region on a uniform background — is closed, and it
+gets split *wherever the sweep happened to reach it first*. That is an arbitrary
+point on the smoothest contour in the picture. Treat it as a corner and every
+floating blob in every photo gets one kink, in a different place each time the
+segmentation shifts by a pixel. So a closed chain is fitted as periodic: corners
+are searched with wraparound, and if the seam is not one of them its tangent is
+estimated from the points on *both* sides, so the curve leaves in the direction
+it arrived. `tests/fit.rs` measures the turn at every joint of a digitised
+circle: 0.00 as it stands, 0.60 with the seam treated as a corner.
+
+**The seam survives curves**, which needed one thing to be exact. A fitted chain
+is a list of vertices carrying the control point arriving at each and the one
+leaving it; reversing it reverses the list and swaps those two per vertex — the
+same four numbers in the other order, so the two faces of a shared boundary get
+identical geometry, not merely identical endpoints. The seam test compares whole
+curves, controls included, because two cubics that start and end together can
+still bulge apart, and the gap between them would show the background exactly as
+two disagreeing polylines would.
+
+**Real progress on the page.** The photo path now reports how far along it is
+through a callback, and the page draws a real bar instead of a pulsing one. The
+weights are measured, not guessed — on a 2730×1536 corpus image, of 471 ms: 148
+palette, 172 labelling, 46 specks, 79 boundaries, 26 document. Two thirds of the
+time is two passes over the image, and those report per row; the rest reports per
+stage. The sprite path reports nothing but completion, because after the first
+step it is working on a drawing a few dozen pixels across.
+
+## What the plan got wrong along the way
+
+One prediction turns out not to hold, and it is worth correcting rather than
+repeating: unfiltered specks were supposed to make the SVG *bigger than the PNG*.
+Measured, it comes out at 0.2–0.6× the PNG — but only because these particular
+PNGs are pathologically noisy pixel art with 64k–159k distinct colours, so they
+compress badly. The case for the speck filter stood on path count, not on file
+size, and that is how it was judged.
+
+**Seam handling** turned out to be a matter of *when* as much as of *what*: the
+half-edge IR was the right type from the start, and the fitting stage was still
+about to undo it by simplifying assembled rings. See the polygon fitter above.
 
 ## Status
 
 What is left, and in what order, lives in the newest file in
 [`SESSIONS/`](../SESSIONS/) — currently
-[`2026-08-10-11h31.polygon-fitting.md`](../SESSIONS/2026-08-10-11h31.polygon-fitting.md).
+[`2026-08-10-17h02.curves-and-a-progress-bar.md`](../SESSIONS/2026-08-10-17h02.curves-and-a-progress-bar.md).
 The original decision is in
 [`2026-08-09-10h00.img2svg-two-axes.md`](../SESSIONS/2026-08-09-10h00.img2svg-two-axes.md);
 the files between the two record how each stage was reasoned about, including

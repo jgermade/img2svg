@@ -239,6 +239,107 @@ impl Conversion {
     }
 }
 
+/// Las fases de una conversión, y lo que pesa cada una en el total.
+///
+/// Los pesos están **medidos**, no repartidos a ojo: sobre una imagen del corpus
+/// de 2730x1536, de 471 ms totales, la paleta se lleva 148, el etiquetado 172,
+/// el filtrado de motas 46, las fronteras 79 y el documento 26. El reparto
+/// aguanta el cambio de tamaño y el de ajustador —con curvas el documento sigue
+/// costando un 6%—, que es lo que hace que sirva de peso fijo.
+///
+/// Sin esto la barra no puede decir nada útil: el 66% del tiempo se va en dos
+/// recorridos de la imagen, y una barra que sólo se moviera al acabar cada fase
+/// estaría parada justo cuando hay que enseñar que algo pasa.
+#[derive(Clone, Copy, Debug)]
+pub enum Stage {
+    /// Contar colores y construir la paleta.
+    Palette,
+    /// Etiquetar las regiones conexas.
+    Regions,
+    /// Fundir las motas en sus vecinas.
+    Speckle,
+    /// Extraer las fronteras y armar los anillos.
+    Boundaries,
+    /// Ajustar los contornos y escribir el SVG.
+    Document,
+}
+
+impl Stage {
+    /// Dónde empieza y cuánto ocupa, del total.
+    fn span(self) -> (f64, f64) {
+        match self {
+            Stage::Palette => (0.00, 0.30),
+            Stage::Regions => (0.30, 0.36),
+            Stage::Speckle => (0.66, 0.10),
+            Stage::Boundaries => (0.76, 0.17),
+            Stage::Document => (0.93, 0.07),
+        }
+    }
+}
+
+/// A quién avisar del avance, y por dónde va.
+///
+/// Va como parámetro aparte y no como campo de [`Config`] a propósito: `Config`
+/// es `Clone + Debug + Default` y se copia por todas partes, y meterle dentro un
+/// `&mut dyn FnMut` obligaría a todo eso a arrastrar un tiempo de vida para algo
+/// que sólo le importa a quien pinta una barra.
+pub struct Progress<'a> {
+    report: Option<&'a mut dyn FnMut(f64)>,
+    /// Último tanto por ciento avisado. La limitación va aquí y no en cada
+    /// llamador porque si no, uno se olvida: por fila de una imagen grande son
+    /// millares de saltos al otro lado del wasm para pintar el mismo píxel.
+    last: i64,
+    base: f64,
+    span: f64,
+}
+
+impl Default for Progress<'_> {
+    fn default() -> Self {
+        Progress {
+            report: None,
+            last: -1,
+            base: 0.0,
+            span: 0.0,
+        }
+    }
+}
+
+impl<'a> Progress<'a> {
+    pub fn new(report: &'a mut dyn FnMut(f64)) -> Self {
+        Progress {
+            report: Some(report),
+            ..Progress::default()
+        }
+    }
+
+    /// Entra en una fase. Lo que se avise a partir de aquí se coloca en el hueco
+    /// que le toca del total.
+    pub fn stage(&mut self, stage: Stage) {
+        (self.base, self.span) = stage.span();
+        self.at(0, 1);
+    }
+
+    /// Avance dentro de la fase en curso.
+    pub fn at(&mut self, done: usize, total: usize) {
+        let Some(report) = self.report.as_mut() else {
+            return;
+        };
+        let fraction = self.base + self.span * (done as f64 / total.max(1) as f64);
+        let percent = (fraction * 100.0) as i64;
+        if percent != self.last {
+            self.last = percent;
+            report(fraction.clamp(0.0, 1.0));
+        }
+    }
+
+    /// Se acabó. Se avisa siempre, aunque el último tanto por ciento coincida.
+    fn finish(&mut self) {
+        if let Some(report) = self.report.as_mut() {
+            report(1.0);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Error {
     /// El formato no se reconoce o el fichero está corrupto.
@@ -287,6 +388,20 @@ pub fn convert_rgba(
     data: &[u8],
     config: &Config,
 ) -> Result<Conversion, Error> {
+    convert_rgba_with(width, height, data, config, &mut Progress::default())
+}
+
+/// Lo mismo, avisando del avance.
+///
+/// Es otra función y no un parámetro más de [`convert_rgba`] porque casi nadie
+/// lo necesita: sólo quien convierte una imagen grande delante de alguien.
+pub fn convert_rgba_with(
+    width: u32,
+    height: u32,
+    data: &[u8],
+    config: &Config,
+    progress: &mut Progress,
+) -> Result<Conversion, Error> {
     let expected = width as usize * height as usize * 4;
     if data.len() != expected {
         return Err(Error::BadBufferSize {
@@ -295,22 +410,36 @@ pub fn convert_rgba(
         });
     }
     let img = RgbaImage::from_raw(width, height, data.to_vec()).ok_or(Error::EmptyImage)?;
-    convert_image(&img, config)
+    convert_image_with(&img, config, progress)
 }
 
 /// Convierte una imagen ya decodificada.
 ///
 /// El proceso es `imagen -> segmentar -> regiones -> ajustar -> documento`.
 pub fn convert_image(img: &RgbaImage, config: &Config) -> Result<Conversion, Error> {
+    convert_image_with(img, config, &mut Progress::default())
+}
+
+pub fn convert_image_with(
+    img: &RgbaImage,
+    config: &Config,
+    progress: &mut Progress,
+) -> Result<Conversion, Error> {
     let (w, h) = img.dimensions();
     if w == 0 || h == 0 {
         return Err(Error::EmptyImage);
     }
-    match &config.segmentation {
+    let out = match &config.segmentation {
+        // El camino de rejilla no reparte avance: reduce la imagen a la rejilla
+        // en el primer paso, y a partir de ahí trabaja sobre un dibujo de unas
+        // decenas de píxeles de lado. Lo que tarda es una décima de segundo, y
+        // trocearla sería inventarse un detalle que no está.
         Segmentation::Grid(options) => convert_grid(img, options, config),
         #[cfg(feature = "photo")]
-        Segmentation::Cluster(options) => Ok(convert_cluster(img, options, config)),
-    }
+        Segmentation::Cluster(options) => Ok(convert_cluster(img, options, config, progress)),
+    };
+    progress.finish();
+    out
 }
 
 fn convert_grid(
@@ -386,9 +515,16 @@ fn convert_grid(
 /// damero, la celda, el `pixel_size` que sigue a la escala detectada— aparece,
 /// que es justo lo que quiere decir que sean dos ejes y no dos programas.
 #[cfg(feature = "photo")]
-fn convert_cluster(img: &RgbaImage, options: &ClusterOptions, config: &Config) -> Conversion {
-    let clustering = cluster::from_image(img, options);
+fn convert_cluster(
+    img: &RgbaImage,
+    options: &ClusterOptions,
+    config: &Config,
+    progress: &mut Progress,
+) -> Conversion {
+    let clustering = cluster::from_image_with(img, options, progress);
+    progress.stage(Stage::Boundaries);
     let regions = boundary::from_clustering(&clustering);
+    progress.stage(Stage::Document);
 
     // Una unidad del `viewBox` es un píxel de la imagen, así que el SVG sale a
     // tamaño natural. En rejilla hay una escala que recuperar y aquí no.

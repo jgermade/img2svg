@@ -49,6 +49,7 @@ use image::RgbaImage;
 use crate::background;
 use crate::color::{Oklab, Rgba};
 use crate::speckle;
+use crate::{Progress, Stage};
 
 /// Etiqueta de un píxel que no pertenece a ninguna región por ser transparente.
 ///
@@ -154,8 +155,22 @@ pub struct Clustering {
 
 /// Segmenta una imagen ya decodificada.
 pub fn from_image(img: &RgbaImage, options: &ClusterOptions) -> Clustering {
+    from_image_with(img, options, &mut Progress::default())
+}
+
+/// Lo mismo, avisando del avance.
+///
+/// Las dos pasadas por la imagen —contar colores y etiquetar— son dos tercios
+/// del tiempo de una conversión de foto, así que son las dos que avisan por
+/// fila. Lo de después va por fases enteras: son tres saltos, pero cortos.
+pub fn from_image_with(
+    img: &RgbaImage,
+    options: &ClusterOptions,
+    progress: &mut Progress,
+) -> Clustering {
     let (w, h) = (img.width() as usize, img.height() as usize);
-    let palette = Palette::build(img, options);
+    let palette = Palette::build(img, options, progress);
+    progress.stage(Stage::Regions);
 
     let mut labels = vec![NONE; w * h];
     let mut sets = Sets::default();
@@ -171,6 +186,7 @@ pub fn from_image(img: &RgbaImage, options: &ClusterOptions) -> Clustering {
     let raw = img.as_raw();
 
     for y in 0..h {
+        progress.at(y, h);
         let base = y * w * 4;
         for (x, px) in raw[base..base + w * 4].chunks_exact(4).enumerate() {
             row[x] = palette.lookup(px, options);
@@ -219,6 +235,7 @@ pub fn from_image(img: &RgbaImage, options: &ClusterOptions) -> Clustering {
     }
 
     let mut clustering = finish(labels, w, h, &mut sets, &run_color);
+    progress.stage(Stage::Speckle);
 
     // Las motas primero y el fondo después, y no al revés: una mota que estaba
     // sobre el fondo se funde con él y desaparece con él. Quitando el fondo antes,
@@ -354,16 +371,27 @@ impl Palette {
     /// distancia es la de Oklab, y la conversión de cada color se saca fuera del
     /// bucle —que es de colores por entradas— en vez de repetirla en cada
     /// comparación.
-    fn build(img: &RgbaImage, options: &ClusterOptions) -> Self {
+    fn build(img: &RgbaImage, options: &ClusterOptions, progress: &mut Progress) -> Self {
+        progress.stage(Stage::Palette);
         let bits = options.color_precision;
         let mut counts: HashMap<Rgba, usize> = HashMap::new();
-        for px in img.as_raw().chunks_exact(4) {
-            if px[3] < options.alpha_threshold {
-                continue;
+        // Por filas, y no de un tirón sobre todos los píxeles, sólo para poder
+        // decir por dónde va: es el 30% del tiempo de la conversión.
+        let h = img.height() as usize;
+        for (y, row) in img
+            .as_raw()
+            .chunks_exact(img.width() as usize * 4)
+            .enumerate()
+        {
+            progress.at(y, h);
+            for px in row.chunks_exact(4) {
+                if px[3] < options.alpha_threshold {
+                    continue;
+                }
+                *counts
+                    .entry(Rgba::new(px[0], px[1], px[2], px[3]).quantize(bits))
+                    .or_insert(0) += 1;
             }
-            *counts
-                .entry(Rgba::new(px[0], px[1], px[2], px[3]).quantize(bits))
-                .or_insert(0) += 1;
         }
 
         let mut distinct: Vec<(Rgba, usize)> = counts.into_iter().collect();

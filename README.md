@@ -47,13 +47,19 @@ lienzo 662x1079, 1099 regiones
 `--fit` is shared by both, because how a contour becomes path data is a separate
 decision from how the image becomes regions. `pixel` writes the staircase of
 pixel edges literally; `polygon` straightens it into segments, which takes 12–30%
-off the file depending on the tolerance:
+off the file depending on the tolerance; `spline` fits cubic Béziers, keeping the
+corners sharp:
 
 ```sh
 ./target/release/img2svg photo label.png --fit polygon
+./target/release/img2svg photo label.png --fit spline
 ```
 
-Curve fitting — `spline` — is [not built yet](docs/curves.md).
+Pick `spline` for an outline that stays smooth however far you zoom, not for a
+smaller file: at the same tolerance it comes out 10–25% *bigger* than `polygon`,
+because a cubic costs six numbers where a line costs two. It also starts at a
+higher tolerance (1.5 against 0.75) — see [docs/curves.md](docs/curves.md) for
+why, and for the measurements.
 
 When an image comes out wrong it is nearly always the grid: check the cell size
 in the report and pin it by hand with `--scale`. Full option list in

@@ -187,11 +187,12 @@
               <select id="fit">
                 <option value="pixel" selected>Escalera de píxel</option>
                 <option value="polygon">Polígono simplificado</option>
+                <option value="spline">Curvas</option>
               </select>
               <small>
                 En pixel art la escalera <em>es</em> el dibujo, así que lo normal
                 es dejarla. El polígono endereza las diagonales, que aquí son
-                escalones a propósito.
+                escalones a propósito, y las curvas redondean el sprite entero.
               </small>
             </label>
 
@@ -261,10 +262,13 @@
             <select id="photoFit">
               <option value="pixel" selected>Escalera de píxel</option>
               <option value="polygon">Polígono simplificado</option>
+              <option value="spline">Curvas</option>
             </select>
             <small>
               El polígono junta en un tramo recto los escalones que no dibujan
-              nada: el mismo dibujo con bastante menos SVG.
+              nada: el mismo dibujo con bastante menos SVG. Las curvas no
+              comprimen —salen algo más grandes—, pero el contorno sigue siendo
+              liso por mucho que se amplíe.
             </small>
           </label>
 

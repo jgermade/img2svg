@@ -7,7 +7,7 @@ use js_sys::Reflect;
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "photo")]
-use crate::ClusterOptions;
+use crate::{ClusterOptions, Progress};
 use crate::{Config, Fit, GridOptions, Grouping};
 
 /// Resultado de la conversión, con los datos de la rejilla empleada.
@@ -188,9 +188,29 @@ pub fn convert_photo(
     #[wasm_bindgen(unchecked_param_type = "PhotoOptions")] options: &JsValue,
 ) -> Result<PhotoConversion, JsError> {
     let config = read_cluster_config(options);
-    crate::convert_rgba(width, height, data, &config)
-        .map(|inner| PhotoConversion { inner })
-        .map_err(|e| JsError::new(&e.to_string()))
+
+    // El aviso de avance es una función, así que llega por aquí y no por el
+    // objeto de opciones que la página manda al worker: una función no
+    // sobrevive a un `postMessage`. La pone el worker justo antes de llamar.
+    let on_progress = Options(options)
+        .get("onProgress")
+        .and_then(|v| v.dyn_into::<js_sys::Function>().ok());
+    let mut report = |fraction: f64| {
+        if let Some(f) = &on_progress {
+            // Si el callback revienta, la conversión sigue: es una barra.
+            let _ = f.call1(&JsValue::NULL, &JsValue::from_f64(fraction));
+        }
+    };
+
+    crate::convert_rgba_with(
+        width,
+        height,
+        data,
+        &config,
+        &mut Progress::new(&mut report),
+    )
+    .map(|inner| PhotoConversion { inner })
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Las claves de foto, para el `.d.ts`. Escrita a mano contra
@@ -218,6 +238,16 @@ export interface PhotoOptions extends FitOptions {
     removeBackground?: boolean;
     /** Fondo impuesto, en hexadecimal, en vez del detectado. */
     background?: string;
+    /**
+     * Aviso de avance, de 0 a 1. Se llama como mucho una vez por cada tanto por
+     * ciento.
+     *
+     * Sólo lo tiene el camino de foto: es el que puede tardar medio segundo en
+     * una imagen de 4 Mpx. El de pixel art reduce la imagen a la rejilla en el
+     * primer paso y a partir de ahí trabaja sobre unas decenas de píxeles de
+     * lado, así que no hay avance que contar.
+     */
+    onProgress?: (fraction: number) => void;
 }
 "#;
 
@@ -266,10 +296,11 @@ const FIT_OPTIONS: &str = r#"
 /** Ajuste del contorno. Común a las dos segmentaciones. */
 export interface FitOptions {
     /** Ajustador. Por omisión `"pixel"`, que dibuja la escalera tal cual. */
-    fit?: "pixel" | "polygon";
+    fit?: "pixel" | "polygon" | "spline";
     /**
-     * Desvío máximo, en píxeles, que puede meter `"polygon"`. Ningún punto del
-     * contorno acaba más lejos que esto de lo que se dibuja.
+     * Desvío máximo, en píxeles, que pueden meter `"polygon"` y `"spline"`.
+     * Ningún punto del contorno acaba más lejos que esto de lo que se dibuja.
+     * Por omisión, 0.75 con `"polygon"` y 1.5 con `"spline"`.
      */
     fitTolerance?: number;
 }
@@ -277,16 +308,17 @@ export interface FitOptions {
 
 /// El eje de ajuste, que es el mismo para las dos segmentaciones y por eso se
 /// lee en un solo sitio: `fit` con el nombre del ajustador y `fitTolerance` con
-/// lo que necesita el de polígono. Un nombre desconocido cae en el de píxel, que
-/// es el que dibuja siempre algo.
+/// lo que necesitan los dos que ajustan. Un nombre desconocido cae en el de
+/// píxel, que es el que dibuja siempre algo.
 fn read_fit(o: &Options) -> Fit {
-    match o.text("fit").as_deref() {
-        Some("polygon") => Fit::Polygon {
-            tolerance: o
-                .number("fitTolerance")
-                .unwrap_or(Fit::POLYGON_TOLERANCE)
-                .max(0.0),
-        },
+    let name = o.text("fit").unwrap_or_default();
+    let tolerance = o
+        .number("fitTolerance")
+        .unwrap_or_else(|| Fit::default_tolerance(&name))
+        .max(0.0);
+    match name.as_str() {
+        "polygon" => Fit::Polygon { tolerance },
+        "spline" => Fit::Spline { tolerance },
         _ => Fit::Pixel,
     }
 }

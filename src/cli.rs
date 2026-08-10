@@ -51,12 +51,17 @@ struct Common {
     #[arg(long, value_enum, default_value_t = FitArg::Pixel)]
     fit: FitArg,
 
-    /// Desviación máxima en píxeles al simplificar el contorno.
+    /// Desviación máxima en píxeles al ajustar el contorno.
     ///
-    /// Sólo la lee `--fit polygon`. Por debajo de 0.707 no se endereza ni una
-    /// diagonal; subirla comprime más y va redondeando las esquinas pequeñas.
-    #[arg(long, default_value_t = Fit::POLYGON_TOLERANCE)]
-    fit_tolerance: f64,
+    /// La leen `--fit polygon` (0.75 por defecto) y `--fit spline` (1.5), y
+    /// promete lo mismo en los dos: ningún punto del contorno acaba más lejos de
+    /// lo que se dibuja. El valor de partida es distinto porque el suelo lo es:
+    /// el polígono elige vértices de la retícula y a 0.75 ya endereza diagonales,
+    /// mientras que una curva por debajo de 1.0 se dedica a perseguir los
+    /// peldaños de la escalera. Subirla comprime más y redondea las esquinas
+    /// pequeñas.
+    #[arg(long)]
+    fit_tolerance: Option<f64>,
 
     /// No imprime información del proceso.
     #[arg(short, long)]
@@ -74,6 +79,8 @@ enum FitArg {
     Pixel,
     /// Segmentos rectos, quitando los vértices que no dibujan nada.
     Polygon,
+    /// Béziers cúbicas, con las esquinas en pico y el resto liso.
+    Spline,
 }
 
 impl Common {
@@ -81,9 +88,18 @@ impl Common {
         match self.fit {
             FitArg::Pixel => Fit::Pixel,
             FitArg::Polygon => Fit::Polygon {
-                tolerance: self.fit_tolerance.max(0.0),
+                tolerance: self.tolerance(Fit::TOLERANCE),
+            },
+            FitArg::Spline => Fit::Spline {
+                tolerance: self.tolerance(Fit::SPLINE_TOLERANCE),
             },
         }
+    }
+
+    /// La tolerancia pedida, o la que le toca a este ajustador. No puede ir en
+    /// `default_value_t` porque no es la misma para los dos.
+    fn tolerance(&self, default: f64) -> f64 {
+        self.fit_tolerance.unwrap_or(default).max(0.0)
     }
 }
 

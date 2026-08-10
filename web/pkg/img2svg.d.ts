@@ -4,10 +4,11 @@
 /** Ajuste del contorno. Común a las dos segmentaciones. */
 export interface FitOptions {
     /** Ajustador. Por omisión `"pixel"`, que dibuja la escalera tal cual. */
-    fit?: "pixel" | "polygon";
+    fit?: "pixel" | "polygon" | "spline";
     /**
-     * Desvío máximo, en píxeles, que puede meter `"polygon"`. Ningún punto del
-     * contorno acaba más lejos que esto de lo que se dibuja.
+     * Desvío máximo, en píxeles, que pueden meter `"polygon"` y `"spline"`.
+     * Ningún punto del contorno acaba más lejos que esto de lo que se dibuja.
+     * Por omisión, 0.75 con `"polygon"` y 1.5 con `"spline"`.
      */
     fitTolerance?: number;
 }
@@ -34,6 +35,16 @@ export interface PhotoOptions extends FitOptions {
     removeBackground?: boolean;
     /** Fondo impuesto, en hexadecimal, en vez del detectado. */
     background?: string;
+    /**
+     * Aviso de avance, de 0 a 1. Se llama como mucho una vez por cada tanto por
+     * ciento.
+     *
+     * Sólo lo tiene el camino de foto: es el que puede tardar medio segundo en
+     * una imagen de 4 Mpx. El de pixel art reduce la imagen a la rejilla en el
+     * primer paso y a partir de ahí trabaja sobre unas decenas de píxeles de
+     * lado, así que no hay avance que contar.
+     */
+    onProgress?: (fraction: number) => void;
 }
 
 
@@ -172,6 +183,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_conversion_free: (a: number, b: number) => void;
+    readonly __wbg_photoconversion_free: (a: number, b: number) => void;
     readonly conversion_background: (a: number) => [number, number];
     readonly conversion_cellHeight: (a: number) => number;
     readonly conversion_cellWidth: (a: number) => number;
@@ -187,15 +199,14 @@ export interface InitOutput {
     readonly conversion_svg: (a: number) => [number, number];
     readonly convertPhoto: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
     readonly convertRgba: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
+    readonly photoconversion_background: (a: number) => [number, number];
     readonly photoconversion_regions: (a: number) => number;
+    readonly photoconversion_svg: (a: number) => [number, number];
     readonly photoconversion_canvasHeight: (a: number) => number;
     readonly photoconversion_canvasWidth: (a: number) => number;
     readonly photoconversion_colors: (a: number) => number;
     readonly photoconversion_paths: (a: number) => number;
     readonly photoconversion_subpaths: (a: number) => number;
-    readonly __wbg_photoconversion_free: (a: number, b: number) => void;
-    readonly photoconversion_background: (a: number) => [number, number];
-    readonly photoconversion_svg: (a: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

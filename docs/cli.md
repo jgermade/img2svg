@@ -29,8 +29,8 @@ subcommand.
 | `<INPUT>` | | Input image. PNG, JPEG, GIF, BMP or WebP. |
 | `-o, --output <FILE>` | input`.svg` | Output file. |
 | `-b, --background <COLOUR>` | none | Adds a background rectangle, e.g. `"#ffffff"`. |
-| `--fit <pixel\|polygon>` | `pixel` | How a contour becomes path data. See below. |
-| `--fit-tolerance <N>` | `0.75` | Maximum deviation in pixels, for `--fit polygon`. |
+| `--fit <pixel\|polygon\|spline>` | `pixel` | How a contour becomes path data. See below. |
+| `--fit-tolerance <N>` | per fitter | Maximum deviation in pixels: 0.75 for `polygon`, 1.5 for `spline`. |
 | `-q, --quiet` | off | Silences the report on stderr. |
 
 ### `--fit`, the other axis
@@ -57,6 +57,18 @@ The tolerance is a deviation in pixels, and 0.707 is the number that governs it:
 that is how far the step of a 45° staircase sits from its own chord, so below it
 nothing straightens at all, and `0` reproduces `pixel` exactly. The default sits
 just above.
+
+`spline` fits cubic Béziers, keeping the corners sharp and everything else
+smooth. It is **not** a way to get a smaller file — measured against `polygon` at
+the same tolerance it is 10–25% bigger, because a cubic costs six numbers where a
+line costs two. What it buys is an outline that stays smooth however far you zoom
+in, instead of facets frozen at the tolerance you picked.
+
+It also needs more room than `polygon`, which is why `--fit-tolerance` has no
+single default: the contour it starts from is a staircase with up to 0.707 px of
+its own error baked in, and below about 1.0 the fitter spends its budget chasing
+the steps rather than the shape. Hence 1.5. See [the curves
+notes](curves.md#bézier-fitting-fitsplinesrs) for the measurements.
 
 What it does **not** promise is that a feature taller than the tolerance
 survives. RDP measures against whatever chord the recursion currently holds, not

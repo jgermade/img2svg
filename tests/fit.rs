@@ -12,7 +12,70 @@ use std::collections::{HashMap, HashSet};
 
 use img2svg::{Config, Conversion, Fit, GridOptions};
 
-type Point = (i32, i32);
+type Point = (f64, f64);
+
+/// Un tramo dibujado: de dónde a dónde, y con qué controles si es curvo.
+///
+/// Leer tramos y no puntos sueltos es lo que permite comprobar una costura con
+/// curvas: que las dos caras de una frontera coincidan en los extremos no dice
+/// nada si por en medio cada una dibuja una curva distinta.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Seg {
+    from: Point,
+    to: Point,
+    controls: Option<(Point, Point)>,
+}
+
+impl Seg {
+    /// Puntos de la curva, para medir contra ella. Con 16 pasos el error de
+    /// muestreo queda muy por debajo de las centésimas que se comparan.
+    fn sample(&self) -> Vec<Point> {
+        let Some((c1, c2)) = self.controls else {
+            return vec![self.from, self.to];
+        };
+        (0..=16)
+            .map(|k| {
+                let u = k as f64 / 16.0;
+                let v = 1.0 - u;
+                let (b0, b1, b2, b3) = (v * v * v, 3.0 * u * v * v, 3.0 * u * u * v, u * u * u);
+                (
+                    self.from.0 * b0 + c1.0 * b1 + c2.0 * b2 + self.to.0 * b3,
+                    self.from.1 * b0 + c1.1 * b1 + c2.1 * b2 + self.to.1 * b3,
+                )
+            })
+            .collect()
+    }
+
+    /// El mismo tramo del revés, que es como lo dibuja la cara de enfrente.
+    fn reversed(&self) -> Seg {
+        Seg {
+            from: self.to,
+            to: self.from,
+            controls: self.controls.map(|(c1, c2)| (c2, c1)),
+        }
+    }
+
+    /// Dirección con la que sale del punto de partida.
+    fn leaving(&self) -> Point {
+        let to = self.controls.map_or(self.to, |(c1, _)| c1);
+        unit((to.0 - self.from.0, to.1 - self.from.1))
+    }
+
+    /// Dirección con la que llega al punto final.
+    fn arriving(&self) -> Point {
+        let from = self.controls.map_or(self.from, |(_, c2)| c2);
+        unit((self.to.0 - from.0, self.to.1 - from.1))
+    }
+}
+
+fn unit(v: Point) -> Point {
+    let len = (v.0 * v.0 + v.1 * v.1).sqrt();
+    if len == 0.0 {
+        (0.0, 0.0)
+    } else {
+        (v.0 / len, v.1 / len)
+    }
+}
 
 /// Colores bien separados: la tolerancia va a 0, así que cualquier par distinto
 /// vale, pero mirando el SVG se distinguen. El punto es transparente, para poder
@@ -70,20 +133,38 @@ fn path_data(svg: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Los subtrazados del documento, como listas de puntos absolutos.
-fn subpaths(svg: &str) -> Vec<Vec<Point>> {
+/// Los subtrazados del documento, como listas de tramos.
+fn subpaths(svg: &str) -> Vec<Vec<Seg>> {
     path_data(svg).iter().flat_map(|d| parse(d)).collect()
 }
 
-/// Lee un `d` de los que emite el ajuste: `M`, `h`, `v`, `l` y `z`, todos
+/// Los vértices de cada subtrazado, que es lo que basta cuando no hay curvas.
+fn corners(svg: &str) -> Vec<Vec<Point>> {
+    subpaths(svg)
+        .iter()
+        .map(|path| path.iter().map(|s| s.from).collect())
+        .collect()
+}
+
+/// Lee un `d` de los que emite el ajuste: `M`, `h`, `v`, `l`, `c` y `z`, todos
 /// relativos menos el primero. Cualquier otro comando hace fallar el test, que
 /// es lo que se quiere si un día se emite algo que no se pretendía.
-fn parse(d: &str) -> Vec<Vec<Point>> {
+fn parse(d: &str) -> Vec<Vec<Seg>> {
     let chars: Vec<char> = d.chars().collect();
     let mut paths = Vec::new();
-    let mut points: Vec<Point> = Vec::new();
-    let mut at = (0, 0);
+    let mut segs: Vec<Seg> = Vec::new();
+    let mut at = (0.0, 0.0);
+    let mut start = at;
     let mut i = 0;
+
+    fn line(segs: &mut Vec<Seg>, at: &mut Point, to: Point) {
+        segs.push(Seg {
+            from: *at,
+            to,
+            controls: None,
+        });
+        *at = to;
+    }
 
     while i < chars.len() {
         let command = chars[i];
@@ -91,35 +172,53 @@ fn parse(d: &str) -> Vec<Vec<Point>> {
         match command {
             'M' => {
                 at = (number(&chars, &mut i), number(&chars, &mut i));
-                points.push(at);
+                start = at;
             }
             'h' => {
-                at.0 += number(&chars, &mut i);
-                points.push(at);
+                let to = (at.0 + number(&chars, &mut i), at.1);
+                line(&mut segs, &mut at, to);
             }
             'v' => {
-                at.1 += number(&chars, &mut i);
-                points.push(at);
+                let to = (at.0, at.1 + number(&chars, &mut i));
+                line(&mut segs, &mut at, to);
             }
             'l' => {
-                at = (at.0 + number(&chars, &mut i), at.1 + number(&chars, &mut i));
-                points.push(at);
+                let to = (at.0 + number(&chars, &mut i), at.1 + number(&chars, &mut i));
+                line(&mut segs, &mut at, to);
             }
-            // El cierre es implícito: el último punto no repite el primero.
-            'z' => paths.push(std::mem::take(&mut points)),
+            'c' => {
+                let c1 = (at.0 + number(&chars, &mut i), at.1 + number(&chars, &mut i));
+                let c2 = (at.0 + number(&chars, &mut i), at.1 + number(&chars, &mut i));
+                let to = (at.0 + number(&chars, &mut i), at.1 + number(&chars, &mut i));
+                segs.push(Seg {
+                    from: at,
+                    to,
+                    controls: Some((c1, c2)),
+                });
+                at = to;
+            }
+            // La `z` cierra con una recta, y sólo hay que escribirla si el
+            // último tramo no acababa ya en el punto de partida.
+            'z' => {
+                if at != start {
+                    line(&mut segs, &mut at, start);
+                }
+                at = start;
+                paths.push(std::mem::take(&mut segs));
+            }
             other => panic!("comando {other:?} inesperado en {d:?}"),
         }
     }
-    assert!(points.is_empty(), "un subtrazado sin cerrar en {d:?}");
+    assert!(segs.is_empty(), "un subtrazado sin cerrar en {d:?}");
     paths
 }
 
-fn number(chars: &[char], i: &mut usize) -> i32 {
+fn number(chars: &[char], i: &mut usize) -> f64 {
     let start = *i;
     if chars[*i] == '-' {
         *i += 1;
     }
-    while *i < chars.len() && chars[*i].is_ascii_digit() {
+    while *i < chars.len() && (chars[*i].is_ascii_digit() || chars[*i] == '.') {
         *i += 1;
     }
     let n = chars[start..*i]
@@ -148,28 +247,45 @@ fn number(chars: &[char], i: &mut usize) -> i32 {
 /// dentro de él: una junta colineal en un nodo se puede fundir en una cara y no
 /// en la otra sin mover la línea ni un pelo, y lo que tiene que coincidir es la
 /// línea, no en cuántos comandos se escribió.
+/// Y con curvas hay que comparar **la curva entera**, controles incluidos: dos
+/// cúbicas que empiezan y acaban donde mismo pueden ir por sitios distintos, y
+/// entre las dos quedaría el mismo pelo de fondo que con dos rectas.
 #[cfg(feature = "photo")]
 fn comprueba_costuras(out: &Conversion) {
-    let (w, h) = (out.canvas.0 as i32, out.canvas.1 as i32);
+    let (w, h) = (out.canvas.0 as f64, out.canvas.1 as f64);
     let paths = subpaths(&out.svg);
-    let vertices: HashSet<Point> = paths.iter().flatten().copied().collect();
+    let vertices: HashSet<Key> = paths.iter().flatten().map(|s| key(s.from)).collect();
 
-    let mut counts: HashMap<(Point, Point), usize> = HashMap::new();
-    for path in &paths {
-        for i in 0..path.len() {
-            let ends = (path[i], path[(i + 1) % path.len()]);
-            for (a, b) in split(ends, &vertices) {
-                *counts
-                    .entry(if a < b { (a, b) } else { (b, a) })
-                    .or_default() += 1;
+    // Las curvas van por su cuenta: no se parten por vértices intermedios
+    // —ninguno cae encima— y se cuentan tal cual, orientadas siempre igual.
+    let mut curvas: HashMap<[Key; 4], usize> = HashMap::new();
+    let mut rectas: HashMap<(Key, Key), usize> = HashMap::new();
+
+    for seg in paths.iter().flatten() {
+        match seg.controls {
+            Some(_) => *curvas.entry(canonical(seg)).or_default() += 1,
+            None => {
+                for (a, b) in split((seg.from, seg.to), &vertices) {
+                    *rectas
+                        .entry(if a < b { (a, b) } else { (b, a) })
+                        .or_default() += 1;
+                }
             }
         }
     }
 
+    // El dibujo del test tapa el lienzo entero, así que lo único que dibuja una
+    // sola cara es el borde, y el borde siempre es recto: una curva que
+    // aparezca una sola vez es una costura rota.
+    for (curva, n) in &curvas {
+        assert_eq!(n, &2, "la curva {curva:?} la dibujan {n} caras, no dos");
+    }
+
     let mut interiores = 0;
-    for (&(a, b), &n) in &counts {
+    for (&(a, b), &n) in &rectas {
         // El borde del lienzo lo dibuja una sola cara: al otro lado no hay
         // región ninguna.
+        let (w, h) = (key((w, 0.0)).0, key((0.0, h)).1);
         let borde = (a.0 == 0 && b.0 == 0)
             || (a.1 == 0 && b.1 == 0)
             || (a.0 == w && b.0 == w)
@@ -186,15 +302,40 @@ fn comprueba_costuras(out: &Conversion) {
     );
 }
 
+/// Una coordenada como entero de centésimas, que es la precisión con la que se
+/// escribe. Hace falta para poder meterlas en una tabla, y de paso dice que lo
+/// que se compara es lo escrito y no lo que se tenía en memoria.
+#[cfg(feature = "photo")]
+type Key = (i64, i64);
+
+#[cfg(feature = "photo")]
+fn key(p: Point) -> Key {
+    ((p.0 * 100.0).round() as i64, (p.1 * 100.0).round() as i64)
+}
+
+/// Los cuatro puntos de una curva, orientados siempre igual, para que la misma
+/// curva dibujada en los dos sentidos dé la misma clave.
+#[cfg(feature = "photo")]
+fn canonical(seg: &Seg) -> [Key; 4] {
+    let seg = if key(seg.from) <= key(seg.to) {
+        *seg
+    } else {
+        seg.reversed()
+    };
+    let (c1, c2) = seg.controls.expect("sólo se llama con curvas");
+    [key(seg.from), key(c1), key(c2), key(seg.to)]
+}
+
 /// Parte un segmento por los vértices que caen dentro de él.
 #[cfg(feature = "photo")]
-fn split((a, b): (Point, Point), vertices: &HashSet<Point>) -> Vec<(Point, Point)> {
-    let d = ((b.0 - a.0) as i64, (b.1 - a.1) as i64);
+fn split((a, b): (Point, Point), vertices: &HashSet<Key>) -> Vec<(Key, Key)> {
+    let (a, b) = (key(a), key(b));
+    let d = (b.0 - a.0, b.1 - a.1);
     let largo = d.0 * d.0 + d.1 * d.1;
-    let mut dentro: Vec<(i64, Point)> = vertices
+    let mut dentro: Vec<(i64, Key)> = vertices
         .iter()
         .filter_map(|&v| {
-            let p = ((v.0 - a.0) as i64, (v.1 - a.1) as i64);
+            let p = (v.0 - a.0, v.1 - a.1);
             let alineado = d.0 * p.1 - d.1 * p.0 == 0;
             let avance = d.0 * p.0 + d.1 * p.1;
             (alineado && avance > 0 && avance < largo).then_some((avance, v))
@@ -220,8 +361,8 @@ fn split((a, b): (Point, Point), vertices: &HashSet<Point>) -> Vec<(Point, Point
 fn una_diagonal_sale_recta() {
     let escalera = &["#....", "##...", "###..", "####.", "#####"];
 
-    let escalones = subpaths(&convert(escalera, Fit::Pixel).svg);
-    let recta = subpaths(&convert(escalera, Fit::polygon()).svg);
+    let escalones = corners(&convert(escalera, Fit::Pixel).svg);
+    let recta = corners(&convert(escalera, Fit::polygon()).svg);
 
     assert_eq!(escalones.len(), 1);
     assert_eq!(recta.len(), 1, "el ajuste no debe partir el anillo");
@@ -232,8 +373,11 @@ fn una_diagonal_sale_recta() {
     assert_eq!(recta[0].len(), 4);
     // Y los cuatro son vértices que ya estaban: RDP elige, no inventa.
     let mut triangulo = recta[0].clone();
-    triangulo.sort();
-    assert_eq!(triangulo, vec![(0, 0), (0, 5), (1, 0), (5, 5)]);
+    triangulo.sort_by(|a, b| a.partial_cmp(b).expect("sin NaN"));
+    assert_eq!(
+        triangulo,
+        vec![(0.0, 0.0), (0.0, 5.0), (1.0, 0.0), (5.0, 5.0)]
+    );
 }
 
 /// Con tolerancia 0 el polígono dibuja exactamente la escalera: RDP sólo quita
@@ -271,36 +415,57 @@ fn la_tolerancia_acota_lo_que_se_aparta() {
         ".#######.",
         "..##.##..",
     ];
-    let contorno: Vec<Point> = subpaths(&convert(dibujo, Fit::Pixel).svg)
+    let contorno: Vec<Point> = corners(&convert(dibujo, Fit::Pixel).svg)
         .into_iter()
         .flatten()
         .collect();
 
-    for tolerance in [0.0, 0.75, 1.5, 3.0] {
-        let ajustado = subpaths(&convert(dibujo, Fit::Polygon { tolerance }).svg);
+    // Los dos ajustadores prometen lo mismo, así que se les pide lo mismo. El
+    // margen extra es el redondeo del escritor, que trabaja en centésimas.
+    for fit in [
+        Fit::Polygon { tolerance: 0.0 },
+        Fit::Polygon { tolerance: 0.75 },
+        Fit::Polygon { tolerance: 1.5 },
+        Fit::Polygon { tolerance: 3.0 },
+        Fit::Spline { tolerance: 1.0 },
+        Fit::Spline { tolerance: 1.5 },
+        Fit::Spline { tolerance: 3.0 },
+    ] {
+        let tolerance = match fit {
+            Fit::Polygon { tolerance } | Fit::Spline { tolerance } => tolerance,
+            Fit::Pixel => 0.0,
+        };
+        let ajustado = subpaths(&convert(dibujo, fit).svg);
         for &p in &contorno {
             let d = distancia(p, &ajustado);
             assert!(
-                d <= tolerance + 1e-9,
-                "con tolerancia {tolerance} el vértice {p:?} se queda a {d:.3} de lo dibujado"
+                d <= tolerance + 0.01,
+                "con {fit:?} el vértice {p:?} se queda a {d:.3} de lo dibujado"
             );
         }
     }
 }
 
-/// Distancia de un punto al subtrazado más cercano de los dibujados.
-fn distancia(p: Point, paths: &[Vec<Point>]) -> f64 {
+/// Distancia de un punto a lo que se dibuja, curvas incluidas: se muestrean y
+/// se mide contra la poligonal de las muestras.
+fn distancia(p: Point, paths: &[Vec<Seg>]) -> f64 {
     paths
         .iter()
-        .flat_map(|path| (0..path.len()).map(|i| (path[i], path[(i + 1) % path.len()])))
+        .flatten()
+        .flat_map(|seg| {
+            let pts = seg.sample();
+            (0..pts.len() - 1)
+                .map(|i| (pts[i], pts[i + 1]))
+                .collect::<Vec<_>>()
+        })
         .map(|(a, b)| al_segmento(p, a, b))
         .fold(f64::INFINITY, f64::min)
 }
 
 fn al_segmento(p: Point, a: Point, b: Point) -> f64 {
-    let (px, py) = (p.0 as f64, p.1 as f64);
-    let (ax, ay) = (a.0 as f64, a.1 as f64);
-    let (dx, dy) = ((b.0 - a.0) as f64, (b.1 - a.1) as f64);
+    let (px, py) = (p.0, p.1);
+    let (ax, ay) = (a.0, a.1);
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
     let len2 = dx * dx + dy * dy;
     // Proyección recortada al segmento: fuera de él, el punto más cercano es un
     // extremo, y medir contra la recta infinita daría de menos.
@@ -320,6 +485,7 @@ fn el_suavizado_depende_del_ajuste() {
     let dibujo = &["#..", "##.", "###"];
     assert!(convert(dibujo, Fit::Pixel).svg.contains("crispEdges"));
     assert!(!convert(dibujo, Fit::polygon()).svg.contains("crispEdges"));
+    assert!(!convert(dibujo, Fit::spline()).svg.contains("crispEdges"));
 }
 
 /// Las dos caras de cada frontera coinciden, con el ajuste que sea.
@@ -340,8 +506,132 @@ fn las_dos_caras_de_una_frontera_se_ajustan_igual() {
         "rroooo###",
         "rrrooo###",
     ];
-    for fit in [Fit::Pixel, Fit::polygon(), Fit::Polygon { tolerance: 2.5 }] {
+    for fit in [
+        Fit::Pixel,
+        Fit::polygon(),
+        Fit::Polygon { tolerance: 2.5 },
+        Fit::spline(),
+        Fit::Spline { tolerance: 2.5 },
+    ] {
         let out = convert_cluster(dibujo, fit);
+        comprueba_costuras(&out);
+    }
+}
+
+/// Una esquina recta sigue siendo una esquina: el ajuste de curvas no redondea
+/// un rectángulo.
+///
+/// Es lo que separa un ajustador de curvas utilizable de uno que convierte todo
+/// dibujo en una mancha, y lo que decide la detección de esquinas.
+#[test]
+fn un_rectangulo_no_se_curva() {
+    let dibujo = &["....", ".##.", ".##.", "....."];
+    let dibujo = &dibujo[..3];
+    let out = convert(dibujo, Fit::spline());
+    let curvas = subpaths(&out.svg)
+        .iter()
+        .flatten()
+        .filter(|s| s.controls.is_some())
+        .count();
+    assert_eq!(
+        curvas, 0,
+        "un rectángulo no lleva ni una curva: {}",
+        out.svg
+    );
+}
+
+/// Un círculo sale liso, **y la costura no se nota**.
+///
+/// Un bucle que no pasa por ningún nodo se parte por donde caiga
+/// ([`img2svg::boundary`]), y eso cae en medio del contorno más liso que suele
+/// haber en la imagen. Si ese corte se tratara como esquina, todas las manchas
+/// sueltas de todas las fotos saldrían con un pico en un sitio distinto cada
+/// vez. Aquí se comprueba justo eso: en cada junta entre dos curvas, la
+/// dirección con la que se llega y con la que se sale son la misma.
+#[test]
+fn un_circulo_sale_liso() {
+    let (w, h) = (81u32, 81u32);
+    let mut buf = Vec::with_capacity((w * h) as usize * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let d = ((x as f64 - 40.0).powi(2) + (y as f64 - 40.0).powi(2)).sqrt();
+            buf.extend_from_slice(if d <= 30.0 { &NEGRO } else { &NADA });
+        }
+    }
+    let config = Config {
+        fit: Fit::spline(),
+        ..Config::grid(GridOptions {
+            scale: Some(1.0),
+            tolerance: 0.0,
+            remove_checkerboard: false,
+            ..GridOptions::default()
+        })
+    };
+    let out = img2svg::convert_rgba(w, h, &buf, &config).expect("la conversión no debe fallar");
+    let paths = subpaths(&out.svg);
+
+    assert_eq!(paths.len(), 1, "el círculo es un solo subtrazado");
+    let circulo = &paths[0];
+    assert!(
+        circulo.len() <= 12,
+        "un círculo debería salir en pocos tramos, y salen {}: {}",
+        circulo.len(),
+        out.svg
+    );
+
+    // En **todas** las juntas, y no sólo entre curvas: la primera versión de
+    // esto se saltaba las de curva con recta —que en un círculo digitalizado son
+    // todas— y pasaba sin llegar a comprobar nada. Medido: bien cerrado da 0.00
+    // en todas, y tratando la costura como esquina sale un 0.60.
+    for i in 0..circulo.len() {
+        let (antes, despues) = (circulo[i], circulo[(i + 1) % circulo.len()]);
+        let (llega, sale) = (antes.arriving(), despues.leaving());
+        let giro = (llega.0 * sale.1 - llega.1 * sale.0).abs();
+        assert!(
+            giro < 0.1,
+            "la junta en {:?} hace un pico: llega {llega:?} y sale {sale:?}",
+            antes.to
+        );
+    }
+}
+
+/// Y con fronteras compartidas **curvas**, que es el caso que el dibujo de
+/// arriba no llega a tener: mide nueve píxeles de ancho, y en cadenas tan cortas
+/// no se emite ni una curva.
+///
+/// Dos discos planos que se solapan sobre un fondo liso. La frontera entre los
+/// dos discos es un arco compartido por dos regiones, y es exactamente donde una
+/// cúbica mal invertida deja de coincidir consigo misma: mismos extremos, otros
+/// controles, y entre las dos caras asoma el fondo.
+#[test]
+#[cfg(feature = "photo")]
+fn las_dos_caras_de_una_frontera_curva_se_ajustan_igual() {
+    let (w, h) = (120u32, 120u32);
+    let discos = [(45.0f64, 60.0f64, 34.0f64, NEGRO), (75.0, 60.0, 34.0, ROJO)];
+    let mut buf = Vec::with_capacity((w * h) as usize * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let mut color = BLANCO;
+            for &(cx, cy, r, c) in &discos {
+                if ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt() <= r {
+                    color = c;
+                }
+            }
+            buf.extend_from_slice(&color);
+        }
+    }
+
+    for fit in [Fit::spline(), Fit::Spline { tolerance: 2.5 }] {
+        let out = convert_cluster_buf(w, h, &buf, fit);
+        let curvas = subpaths(&out.svg)
+            .iter()
+            .flatten()
+            .filter(|s| s.controls.is_some())
+            .count();
+        assert!(
+            curvas > 0,
+            "sin curvas no se está comprobando nada con {fit:?}"
+        );
         comprueba_costuras(&out);
     }
 }
@@ -350,9 +640,14 @@ fn las_dos_caras_de_una_frontera_se_ajustan_igual() {
 /// fronteras entre regiones. La de rejilla traza cada una por su cuenta.
 #[cfg(feature = "photo")]
 fn convert_cluster(rows: &[&str], fit: Fit) -> Conversion {
+    let (w, h, buf) = pixels(rows);
+    convert_cluster_buf(w, h, &buf, fit)
+}
+
+#[cfg(feature = "photo")]
+fn convert_cluster_buf(w: u32, h: u32, buf: &[u8], fit: Fit) -> Conversion {
     use img2svg::ClusterOptions;
 
-    let (w, h, buf) = pixels(rows);
     let config = Config {
         fit,
         ..Config::cluster(ClusterOptions {
@@ -363,5 +658,5 @@ fn convert_cluster(rows: &[&str], fit: Fit) -> Conversion {
             ..ClusterOptions::default()
         })
     };
-    img2svg::convert_rgba(w, h, &buf, &config).expect("la conversión no debe fallar")
+    img2svg::convert_rgba(w, h, buf, &config).expect("la conversión no debe fallar")
 }

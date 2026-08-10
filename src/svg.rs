@@ -103,9 +103,10 @@ pub fn render(regions: &Regions, opts: &Options) -> Output {
     // cuanto hay un tramo oblicuo hace lo contrario —deja la diagonal
     // escalonada, que es exactamente lo que el ajuste acaba de quitar—, así que
     // depende del ajuste y no del documento.
-    let rendering = match opts.fit {
-        Fit::Pixel => " shape-rendering=\"crispEdges\"",
-        Fit::Polygon { .. } => "",
+    let rendering = if opts.fit.smooth() {
+        ""
+    } else {
+        " shape-rendering=\"crispEdges\""
     };
 
     let svg = format!(

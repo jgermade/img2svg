@@ -80,7 +80,11 @@ self.onmessage = async ({ data }) => {
     reply(id, "stage", { stage: "convert" });
 
     const started = performance.now();
-    const out = engine.convert(image.width, image.height, image.rgba, data.options);
+    // El aviso de avance se añade **aquí** y no en la página: una función no
+    // sobrevive a un `postMessage`, así que lo que cruza es el número de vuelta.
+    // El wasm lo llama una vez por cada tanto por ciento, no por fila.
+    const options = { ...data.options, onProgress: (value) => reply(id, "progress", { value }) };
+    const out = engine.convert(image.width, image.height, image.rgba, options);
 
     // Se copia todo lo que hace falta antes de `free()`: el objeto vive en la
     // memoria del wasm y deja de ser válido en cuanto se libera.

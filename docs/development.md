@@ -97,7 +97,7 @@ It runs in CI, right after the wasm build.
 | Suite | What it covers |
 | --- | --- |
 | `tests/checker.rs`, `grid.rs`, `trace.rs`, `background.rs`, `color.rs`, `palette.rs`, `cluster.rs`, `speckle.rs`, `boundary.rs` | Unit tests per module. |
-| `tests/fit.rs` | The fitting axis, read back out of the emitted `d` attributes rather than from internals. Holds the seam check: every interior segment is drawn by exactly two faces, with the same endpoints. |
+| `tests/fit.rs` | The fitting axis, read back out of the emitted `d` attributes rather than from internals — segments and their control points, so curves can be compared as curves. Holds the seam check (every interior segment *and every cubic* is drawn by exactly two faces, identically), the tolerance ceiling for both fitters, and that a digitised circle closes without a kink. |
 | `tests/golden.rs` | Snapshots of the pixel art path over a synthetic ASCII sprite. Input lives in the file, so it runs anywhere. |
 | `tests/photo.rs` | Snapshots of the photo path over a synthetic drawing — a gradient, two flat blocks, a one-pixel line and a few loose dots, one motif per behaviour that was decided by looking at results. |
 | `tests/corpus.rs` | Snapshots over the real images in `examples/`. |

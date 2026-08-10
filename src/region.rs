@@ -79,32 +79,70 @@ impl Regions {
     }
 }
 
-/// Encadena los puntos de un anillo a partir de los tramos que se le den. El
-/// primero no se repite al final: el cierre es implícito.
+/// Lo que hace falta saber de un elemento de cadena para poder ensamblarlo.
+///
+/// Existe para que [`chain`] valga tanto para los puntos que salen de la
+/// segmentación como para los vértices con tangentes que produce el ajuste de
+/// curvas, sin escribir dos veces la regla de qué se repite y dónde. Es un rato
+/// sutil, y tenerla dos veces es exactamente como se estropea.
+pub trait Chainable: Copy {
+    /// El mismo elemento recorrido en sentido contrario. Para un punto es él
+    /// mismo; para un vértice, sus dos controles cambian de lado.
+    fn reversed(self) -> Self;
+
+    /// Funde los dos elementos que coinciden en una junta: `self` es el que ya
+    /// está puesto —el final del tramo anterior— y `next` el primero del
+    /// siguiente, que ocupa el mismo sitio. De uno viene lo que llega a la
+    /// junta y del otro lo que sale.
+    fn join(self, next: Self) -> Self;
+
+    /// Si los dos ocupan el mismo sitio, controles aparte.
+    fn same_place(self, other: Self) -> bool;
+}
+
+impl Chainable for Point {
+    fn reversed(self) -> Self {
+        self
+    }
+
+    fn join(self, _next: Self) -> Self {
+        self
+    }
+
+    fn same_place(self, other: Self) -> bool {
+        self == other
+    }
+}
+
+/// Encadena los tramos de un anillo. El primer elemento no se repite al final:
+/// el cierre es implícito.
 ///
 /// Los tramos llegan por parámetro en vez de leerse de `edges` porque el ajuste
 /// ensambla los suyos, que son otros ([`crate::fit::Fitted`]). La regla de qué
-/// punto se repite y dónde vive aquí, en un solo sitio, y no una vez por
-/// ajustador.
-pub fn chain<'a>(ring: &Ring, points: impl Fn(EdgeId) -> &'a [Point]) -> Vec<Point> {
-    let mut out: Vec<Point> = Vec::new();
+/// se repite y dónde vive aquí, en un solo sitio, y no una vez por ajustador.
+pub fn chain<'a, T: Chainable + 'a>(ring: &Ring, items: impl Fn(EdgeId) -> &'a [T]) -> Vec<T> {
+    let mut out: Vec<T> = Vec::new();
     for &(edge, reversed) in ring {
-        let edge = points(edge);
-        let mut it: Box<dyn Iterator<Item = &Point>> = if reversed {
-            Box::new(edge.iter().rev())
+        let edge = items(edge);
+        let mut it: Box<dyn Iterator<Item = T> + '_> = if reversed {
+            Box::new(edge.iter().rev().map(|v| v.reversed()))
         } else {
-            Box::new(edge.iter())
+            Box::new(edge.iter().copied())
         };
-        // El primer punto de un tramo es el último del anterior.
-        if !out.is_empty() {
-            it.next();
+        // El primer elemento de un tramo es el último del anterior: son el
+        // mismo sitio visto desde los dos lados, y se funden en uno.
+        if let Some(prev) = out.last_mut() {
+            if let Some(first) = it.next() {
+                *prev = prev.join(first);
+            }
         }
-        out.extend(it.copied());
+        out.extend(it);
     }
-    // Y el último punto del anillo es otra vez el primero, porque el tramo que
-    // lo cierra acaba donde empezó el primero.
-    if out.len() > 1 && out.last() == out.first() {
-        out.pop();
+    // Y el final del anillo es otra vez su principio, porque el tramo que lo
+    // cierra acaba donde empezó el primero.
+    if out.len() > 1 && out[out.len() - 1].same_place(out[0]) {
+        let last = out.pop().expect("acabamos de mirar que hay más de uno");
+        out[0] = last.join(out[0]);
     }
     out
 }

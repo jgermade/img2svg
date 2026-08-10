@@ -133,6 +133,7 @@ worker.onmessage = ({ data }) => {
   if (data.id !== request) return;
 
   if (data.kind === "stage") return stage(data.stage);
+  if (data.kind === "progress") return progress(data.value);
   if (data.kind === "error") {
     endProgress();
     return fail(data.message);
@@ -162,6 +163,22 @@ function stage(name) {
   ui.progressBar.style.width = `${step.at}%`;
   ui.progressLabel.textContent = step.label;
   ui.progress.setAttribute("aria-valuenow", String(step.at));
+}
+
+// Avance de verdad, que sólo manda el camino de foto: en cuanto llega el
+// primero se apaga el pulso, porque ya hay algo que contar. El de pixel art no
+// manda ninguno y se queda con el pulso, que es lo honesto cuando lo que se
+// sabe es «está en ello».
+//
+// El tramo de la conversión ocupa de STAGES.convert.at a 100: los pasos de
+// antes —decodificar, leer los píxeles, cargar el motor— son de la página y ya
+// estaban contados.
+function progress(value) {
+  const desde = STAGES.convert.at;
+  const at = Math.round(desde + (100 - desde) * value);
+  ui.progress.classList.remove("pulse");
+  ui.progressBar.style.width = `${at}%`;
+  ui.progress.setAttribute("aria-valuenow", String(at));
 }
 
 function endProgress() {
@@ -243,11 +260,17 @@ async function load(blob, name) {
 
 /* ------------------------------------------------------------- conversión --- */
 
+// Desviación de partida de cada ajustador que la lee. La de curvas es otra a
+// propósito: el contorno del que se parte es una escalera, y por debajo de 1 px
+// la curva se dedica a perseguir los peldaños en vez de la forma.
+const FIT_TOLERANCE = { polygon: 0.75, spline: 1.5 };
+
 // El ajuste es el eje que **no** depende de la segmentación, así que los dos
 // modos mandan exactamente las mismas dos claves y las leen los dos lectores.
 function fitOptions(select, tolerance) {
-  return select.value === "polygon"
-    ? { fit: "polygon", fitTolerance: Number(tolerance.value) }
+  const fit = select.value;
+  return fit in FIT_TOLERANCE
+    ? { fit, fitTolerance: Number(tolerance.value) }
     : { fit: "pixel" };
 }
 
@@ -505,10 +528,17 @@ ui.removeChecker.addEventListener("change", convert);
 ui.removeBackground.addEventListener("change", convert);
 ui.mergeColors.addEventListener("change", convert);
 
-// La desviación sólo la lee el polígono, así que con la escalera se esconde en
-// vez de quedarse ahí sin hacer nada.
-function syncFit(select, field) {
-  field.hidden = select.value !== "polygon";
+// La desviación sólo la leen los dos que ajustan, así que con la escalera se
+// esconde en vez de quedarse ahí sin hacer nada. Y al cambiar de ajustador se
+// vuelve a la suya: son dos suelos distintos, y arrastrar la del polígono al
+// spline es justo el valor con el que el spline sale mal.
+function syncFit(select, field, tolerance, out) {
+  const preset = FIT_TOLERANCE[select.value];
+  field.hidden = preset === undefined;
+  if (preset !== undefined) {
+    tolerance.value = String(preset);
+    out.textContent = tolerance.value;
+  }
 }
 
 for (const [select, field, tolerance, out] of [
@@ -520,9 +550,9 @@ for (const [select, field, tolerance, out] of [
     ui.photoFitToleranceOut,
   ],
 ]) {
-  syncFit(select, field);
+  syncFit(select, field, tolerance, out);
   select.addEventListener("change", () => {
-    syncFit(select, field);
+    syncFit(select, field, tolerance, out);
     convert();
   });
   tolerance.addEventListener("input", () => {

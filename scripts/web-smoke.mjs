@@ -207,9 +207,39 @@ for (const { nombre, convert } of casos) {
     "un ajustador desconocido cae en el de píxel",
   );
 
+  // El de curvas se pide por su nombre y tiene su propia tolerancia por
+  // omisión, así que basta con nombrarlo: si la clave no llegara, saldría la
+  // escalera y no habría ni una `c`.
+  const curvo = convert({ fit: "spline", fitTolerance: 2 });
+  comprueba(/c[-\d]/.test(curvo.svg), "fit: spline emite curvas");
+  curvo.free();
+
   base.free();
   ajustado.free();
 }
+
+// El avance sólo lo cuenta el camino de foto, y es lo único de la API de JS que
+// no se puede comprobar mirando lo que devuelve: hay que ver si llaman.
+console.log("\nprogreso");
+const avisos = [];
+const conProgreso = init.convertPhoto(
+  dibujo.width,
+  dibujo.height,
+  dibujo.data,
+  { onProgress: (v) => avisos.push(v) },
+);
+conProgreso.free();
+
+comprueba(avisos.length > 1, `onProgress se llama (${avisos.length} veces)`);
+comprueba(
+  avisos.every((v, i) => v >= 0 && v <= 1 && (i === 0 || v >= avisos[i - 1])),
+  "los avisos van de 0 a 1 y no retroceden",
+);
+comprueba(avisos.at(-1) === 1, `el último aviso es 1 (es ${avisos.at(-1)})`);
+comprueba(
+  avisos.length <= 101,
+  `no se avisa más de una vez por tanto por ciento (${avisos.length})`,
+);
 
 console.log(fallos === 0 ? "\ntodo en orden" : `\n${fallos} comprobaciones mal`);
 process.exit(fallos === 0 ? 0 : 1);

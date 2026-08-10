@@ -95,7 +95,8 @@ The other axis, and the one that combines with either segmentation.
 | Variant | Meaning |
 | --- | --- |
 | `Fit::Pixel` | The literal staircase of pixel edges, in `h`/`v` commands. The default. |
-| `Fit::Polygon { tolerance }` | Straight segments, keeping only the vertices that draw something (Ramer–Douglas–Peucker). `Fit::polygon()` is the default tolerance, `Fit::POLYGON_TOLERANCE` = 0.75 px. |
+| `Fit::Polygon { tolerance }` | Straight segments, keeping only the vertices that draw something (Ramer–Douglas–Peucker). `Fit::polygon()` is the default tolerance, `Fit::TOLERANCE` = 0.75 px. |
+| `Fit::Spline { tolerance }` | Cubic Béziers fitted by least squares, split at the corners (Schneider). `Fit::spline()` is the default tolerance, `Fit::SPLINE_TOLERANCE` = 1.5 px. |
 
 `tolerance` is a maximum deviation in pixels: no point of the contour ends up
 further than that from what gets drawn, and `0.0` reproduces `Fit::Pixel`
@@ -103,7 +104,15 @@ exactly. Below 0.707 nothing straightens at all — that is how far a 45°
 staircase step sits from its own chord. See [the CLI reference](cli.md#--fit-the-other-axis)
 for the measured trade-off.
 
-`Fit::Spline` is [not built yet](curves.md).
+The two defaults differ because the floors do: the polygon picks lattice
+vertices and honours 0 exactly, while a curve is fitted against a staircase that
+already carries 0.707 px of quantisation error, and below about 1.0 it chases the
+steps instead of the shape. `Fit::default_tolerance(name)` is what the CLI and
+the wasm reader use to pick one from a fitter's name.
+
+`Fit::Spline` does not produce smaller files than `Fit::Polygon` — it is 10–25%
+bigger at the same tolerance — and that is not a defect: it buys an outline that
+stays smooth at any zoom. See [the curves notes](curves.md).
 
 Fitting happens **once per half-edge**, before rings are assembled, so the two
 faces of a shared boundary get identical geometry. `fit::Fitted` is the type that
