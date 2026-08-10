@@ -80,6 +80,24 @@ jobs:
           --out-dir web/pkg --out-name img2svg
           -- --no-default-features --features wasm,photo
 
+      # `web/pkg/img2svg.d.ts` está versionado justo para esto: si lo que
+      # acaba de compilar no coincide con él, la API que ve JavaScript ha
+      # cambiado y hay que verlo. `--exit-code` imprime el diff antes de fallar,
+      # así que el log dice qué se ha movido.
+      #
+      # También salta al subir de versión wasm-bindgen, que reescribe el bloque
+      # `InitOutput` entero. Es ruido, pero del honesto —la superficie que se
+      # publica cambia de verdad—: se recompila, se lee el diff y se commitea.
+      - name: La API de JS no cambia sin querer
+        run: git diff --exit-code -- web/pkg/img2svg.d.ts
+
+      # Y lo que el `.d.ts` no puede decir: que las claves de opciones se leen.
+      # Salen de un `Reflect::get` por cadena, así que una errata no falla, se
+      # queda con el valor por omisión. Node a secas, sin navegador ni
+      # servidor: el paquete ya está compilado en el paso de arriba.
+      - name: Ejercer el wasm desde JavaScript
+        run: node scripts/web-smoke.mjs
+
       - name: Copiar el logotipo
         run: cp img2svg.svg web/
 

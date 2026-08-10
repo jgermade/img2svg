@@ -47,6 +47,51 @@ wire does not pay for two `pkg/` directories, a loader that picks between them,
 two wasm builds in CI and two `.d.ts` files to keep an eye on. Revisit if the
 curve fitters change the shape of that.
 
+### The committed `.d.ts`
+
+`web/pkg/` is generated and ignored **except** `web/pkg/img2svg.d.ts`, which is
+committed. CI rebuilds the wasm and then runs `git diff --exit-code` against it,
+so the API JavaScript sees cannot change without the change appearing in a diff.
+
+After any intentional change to it, rebuild, **read the diff** and commit the
+file. Expect it to fire on a wasm-bindgen bump too: that rewrites the whole
+`InitOutput` block, which lists internal exports. Noise, but of the honest kind —
+the published surface really did change.
+
+Two traps, both already paid for:
+
+- `.gitignore` excludes `/web/pkg/*` and not `/web/pkg/`. Git does not descend
+  into an excluded *directory*, so with the second form the `!` exception below
+  it would never even be read.
+- wasm-pack writes its own `web/pkg/.gitignore` containing `*`, and the deeper
+  file wins. The first `git add` therefore needed `-f`. Once tracked, ignore
+  rules no longer apply to it.
+
+### Exercising the wasm from JavaScript
+
+```sh
+node scripts/web-smoke.mjs
+```
+
+Loads `web/pkg/img2svg.js`, hands `init()` the `.wasm` bytes directly — so it
+needs no server and no browser — and calls `convertRgba` / `convertPhoto` on a
+synthetic buffer built in the script, the way `tests/golden.rs` does. The wasm
+has no image codecs in it (the browser decodes), so a PNG would be no use here.
+
+It checks the three things the Rust tests structurally cannot:
+
+1. the wasm boots and returns an SVG;
+2. **every field `web/worker.js` copies** is still there — that object is the
+   real coupling between page and wasm, and a renamed getter shows up there as
+   `undefined` rather than as an error;
+3. **the option keys are read.** They come out of a `Reflect::get` by string, so
+   a typo does not fail, it quietly takes the default. The committed `.d.ts`
+   freezes the *declared* shape of the API; this is what says it is also wired.
+
+Verified by breaking it: renaming the `"polygon"` arm in `read_fit` makes exactly
+the `fitTolerance` check fail, on both entry points, with everything else green.
+It runs in CI, right after the wasm build.
+
 ## Tests
 
 | Suite | What it covers |
@@ -114,8 +159,9 @@ pass. CI sets it, having fetched the corpus a step earlier.
 ## CI
 
 **`build.yml`** runs on every push to `main`: format, clippy, the corpus fetch,
-tests in debug and release, and the wasm build. It publishes nothing — it just
-leaves the built `web/` as an artifact.
+tests in debug and release, the wasm build, and then the two checks over what
+that build produced — the `.d.ts` diff and `scripts/web-smoke.mjs`. It publishes
+nothing — it just leaves the built `web/` as an artifact.
 
 Tests run in debug *as well as* release because release turns overflow checks
 off — that is exactly how a `u8` underflow in `checker.rs` survived unnoticed.

@@ -11,7 +11,17 @@
 
 # Generados al publicar la web: wasm-pack compila el paquete y el workflow
 # copia ahí el logotipo.
-/web/pkg/
+#
+# El `.d.ts` sí se versiona, para que CI pueda comparar contra él lo que compila
+# y la API que ve JavaScript no pueda cambiar sin que se vea en el diff.
+#
+# Se excluye el contenido y no el directorio porque git no entra en un
+# directorio excluido: con `/web/pkg/` la excepción de abajo ni se miraría. Aun
+# así hizo falta un `git add -f` la primera vez, porque wasm-pack escribe su
+# propio `web/pkg/.gitignore` con un `*` dentro y el fichero más hondo manda
+# sobre éste. Una vez seguido, las reglas de ignorados ya no le afectan.
+/web/pkg/*
+!/web/pkg/img2svg.d.ts
 /web/img2svg.svg
 
 # Volcado de una instantánea que no cuadra, para poder hacerle un diff.

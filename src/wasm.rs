@@ -100,7 +100,7 @@ pub fn convert_rgba(
     width: u32,
     height: u32,
     data: &[u8],
-    options: &JsValue,
+    #[wasm_bindgen(unchecked_param_type = "PixelOptions")] options: &JsValue,
 ) -> Result<Conversion, JsError> {
     let config = read_config(options);
     crate::convert_rgba(width, height, data, &config)
@@ -185,13 +185,41 @@ pub fn convert_photo(
     width: u32,
     height: u32,
     data: &[u8],
-    options: &JsValue,
+    #[wasm_bindgen(unchecked_param_type = "PhotoOptions")] options: &JsValue,
 ) -> Result<PhotoConversion, JsError> {
     let config = read_cluster_config(options);
     crate::convert_rgba(width, height, data, &config)
         .map(|inner| PhotoConversion { inner })
         .map_err(|e| JsError::new(&e.to_string()))
 }
+
+/// Las claves de foto, para el `.d.ts`. Escrita a mano contra
+/// [`read_cluster_config`], que es lo que de verdad las lee.
+#[cfg(feature = "photo")]
+#[wasm_bindgen(typescript_custom_section)]
+const PHOTO_OPTIONS: &str = r#"
+/** Opciones de `convertPhoto`. Todas opcionales. */
+export interface PhotoOptions extends FitOptions {
+    /** Bits por canal que se conservan al cuantizar, de 1 a 8. */
+    colorPrecision?: number;
+    /** Distancia de color por debajo de la cual dos píxeles son el mismo. */
+    tolerance?: number;
+    /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
+    alphaThreshold?: number;
+    /** Área mínima, en píxeles, para que una región sobreviva. */
+    filterSpeckle?: number;
+    /** Grosor mínimo, en píxeles, para que una región sobreviva. */
+    minThickness?: number;
+    /** Escalón de un degradado: separación mínima entre entradas de la paleta. */
+    gradientStep?: number;
+    /** Tope de colores de la paleta. */
+    maxColors?: number;
+    /** Quitar el color de fondo. */
+    removeBackground?: boolean;
+    /** Fondo impuesto, en hexadecimal, en vez del detectado. */
+    background?: string;
+}
+"#;
 
 #[cfg(feature = "photo")]
 fn read_cluster_config(options: &JsValue) -> Config {
@@ -226,6 +254,26 @@ fn read_cluster_config(options: &JsValue) -> Config {
         ..Config::cluster(cluster)
     }
 }
+
+/// Las claves de ajuste, para el `.d.ts`.
+///
+/// Cada interfaz vive pegada al lector que la implementa, y no todas juntas en
+/// un bloque aparte, porque son dos listas escritas a mano que dicen lo mismo:
+/// el compilador no puede cuadrarlas, así que lo único que queda es que quien
+/// añada una clave abajo tenga la interfaz delante de los ojos.
+#[wasm_bindgen(typescript_custom_section)]
+const FIT_OPTIONS: &str = r#"
+/** Ajuste del contorno. Común a las dos segmentaciones. */
+export interface FitOptions {
+    /** Ajustador. Por omisión `"pixel"`, que dibuja la escalera tal cual. */
+    fit?: "pixel" | "polygon";
+    /**
+     * Desvío máximo, en píxeles, que puede meter `"polygon"`. Ningún punto del
+     * contorno acaba más lejos que esto de lo que se dibuja.
+     */
+    fitTolerance?: number;
+}
+"#;
 
 /// El eje de ajuste, que es el mismo para las dos segmentaciones y por eso se
 /// lee en un solo sitio: `fit` con el nombre del ajustador y `fitTolerance` con
@@ -284,6 +332,35 @@ impl Options<'_> {
             .map(|v| v.is_truthy())
     }
 }
+
+/// Las claves de pixel art, para el `.d.ts`. Escrita a mano contra
+/// [`read_config`], que es lo que de verdad las lee.
+#[wasm_bindgen(typescript_custom_section)]
+const PIXEL_OPTIONS: &str = r#"
+/** Opciones de `convertRgba`. Todas opcionales. */
+export interface PixelOptions extends FitOptions {
+    /** Lado de la celda, en píxeles reales, en vez del detectado. */
+    scale?: number;
+    /** Origen de la rejilla. Sólo se usa si vienen los dos. */
+    offsetX?: number;
+    /** Origen de la rejilla. Sólo se usa si vienen los dos. */
+    offsetY?: number;
+    /** Distancia de color por debajo de la cual dos píxeles son el mismo. */
+    tolerance?: number;
+    /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
+    alphaThreshold?: number;
+    /** Lado del píxel del dibujo en el SVG de salida. */
+    pixelSize?: number;
+    /** Un `<path>` por color en vez de uno por región conexa. */
+    mergeColors?: boolean;
+    /** Quitar el damero de transparencia. */
+    removeCheckerboard?: boolean;
+    /** Quitar el color de fondo. */
+    removeBackground?: boolean;
+    /** Fondo impuesto, en hexadecimal, en vez del detectado. */
+    background?: string;
+}
+"#;
 
 fn read_config(options: &JsValue) -> Config {
     let default = GridOptions::default();
