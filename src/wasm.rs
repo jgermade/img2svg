@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "photo")]
 use crate::ClusterOptions;
-use crate::{Config, GridOptions, Grouping};
+use crate::{Config, Fit, GridOptions, Grouping};
 
 /// Resultado de la conversión, con los datos de la rejilla empleada.
 #[wasm_bindgen]
@@ -222,7 +222,24 @@ fn read_cluster_config(options: &JsValue) -> Config {
 
     Config {
         background: o.text("background"),
+        fit: read_fit(&o),
         ..Config::cluster(cluster)
+    }
+}
+
+/// El eje de ajuste, que es el mismo para las dos segmentaciones y por eso se
+/// lee en un solo sitio: `fit` con el nombre del ajustador y `fitTolerance` con
+/// lo que necesita el de polígono. Un nombre desconocido cae en el de píxel, que
+/// es el que dibuja siempre algo.
+fn read_fit(o: &Options) -> Fit {
+    match o.text("fit").as_deref() {
+        Some("polygon") => Fit::Polygon {
+            tolerance: o
+                .number("fitTolerance")
+                .unwrap_or(Fit::POLYGON_TOLERANCE)
+                .max(0.0),
+        },
+        _ => Fit::Pixel,
     }
 }
 
@@ -296,6 +313,7 @@ fn read_config(options: &JsValue) -> Config {
 
     Config {
         background: o.text("background"),
+        fit: read_fit(&o),
         ..Config::grid(grid)
     }
 }

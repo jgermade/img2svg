@@ -21,7 +21,7 @@
 mod common;
 
 use common::check;
-use img2svg::{ClusterOptions, Config, Conversion, Detail};
+use img2svg::{ClusterOptions, Config, Conversion, Detail, Fit};
 
 /// Tamaño del dibujo, sin contar el margen de fondo.
 const W: usize = 64;
@@ -88,9 +88,17 @@ fn paint(margin: usize) -> (u32, u32, Vec<u8>) {
 
 /// Convierte por la vía del búfer crudo, que es la que usa la página.
 fn convert(margin: usize, options: ClusterOptions) -> Conversion {
+    convert_con(margin, options, Fit::Pixel)
+}
+
+/// Lo mismo eligiendo el ajuste, que es el otro eje y no depende de éste.
+fn convert_con(margin: usize, options: ClusterOptions, fit: Fit) -> Conversion {
     let (w, h, buf) = paint(margin);
-    img2svg::convert_rgba(w, h, &buf, &Config::cluster(options))
-        .expect("la conversión no debe fallar")
+    let config = Config {
+        fit,
+        ..Config::cluster(options)
+    };
+    img2svg::convert_rgba(w, h, &buf, &config).expect("la conversión no debe fallar")
 }
 
 fn regions(out: &Conversion) -> usize {
@@ -211,6 +219,37 @@ fn fondo_retirado_y_recortado() {
         &out,
         "dibujo con margen de 6 px, remove_background",
     );
+}
+
+/// El ajuste de polígono sobre la misma segmentación: el mismo dibujo, las
+/// mismas regiones y bastante menos path.
+///
+/// Va aquí y no en las instantáneas de pixel art porque es donde se ve: la
+/// rejilla deja contornos de píxeles cuadrados, que ya son lo que son, y el
+/// degradado a bandas de esta imagen deja fronteras largas y tendidas, que es
+/// justo lo que una escalera describe mal.
+#[test]
+fn el_poligono_dibuja_lo_mismo_con_menos_datos() {
+    let escalera = convert(0, ClusterOptions::default());
+    let out = convert_con(0, ClusterOptions::default(), Fit::polygon());
+
+    assert_eq!(
+        out.paths, escalera.paths,
+        "el ajuste no cambia en cuántas figuras se parte el dibujo"
+    );
+    assert_eq!(out.colors, escalera.colors, "ni la paleta");
+    assert!(
+        out.svg.len() < escalera.svg.len(),
+        "y tiene que ocupar menos: {} bytes contra {}",
+        out.svg.len(),
+        escalera.svg.len()
+    );
+    assert!(
+        !out.svg.contains("crispEdges"),
+        "con oblicuas el suavizado tiene que estar puesto"
+    );
+
+    check("foto-poligono", &out, "dibujo, fit = polygon (0.75)");
 }
 
 /// Sin retirarlo, el mismo dibujo conserva el margen entero: fija el contraste

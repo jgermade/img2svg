@@ -14,8 +14,8 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand};
-use img2svg::{ClusterOptions, Config, Conversion, GridOptions, Grouping};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use img2svg::{ClusterOptions, Config, Conversion, Fit, GridOptions, Grouping};
 
 /// Convierte imágenes en SVG.
 #[derive(Parser)]
@@ -47,9 +47,44 @@ struct Common {
     #[arg(short, long)]
     background: Option<String>,
 
+    /// Cómo se convierte el contorno de una región en datos de path.
+    #[arg(long, value_enum, default_value_t = FitArg::Pixel)]
+    fit: FitArg,
+
+    /// Desviación máxima en píxeles al simplificar el contorno.
+    ///
+    /// Sólo la lee `--fit polygon`. Por debajo de 0.707 no se endereza ni una
+    /// diagonal; subirla comprime más y va redondeando las esquinas pequeñas.
+    #[arg(long, default_value_t = Fit::POLYGON_TOLERANCE)]
+    fit_tolerance: f64,
+
     /// No imprime información del proceso.
     #[arg(short, long)]
     quiet: bool,
+}
+
+/// El eje de ajuste, tal como se nombra en la línea de órdenes.
+///
+/// Es un enum aparte y no el [`Fit`] de la biblioteca porque ese lleva dentro
+/// los parámetros de cada ajustador, y una bandera de línea de órdenes es sólo
+/// el nombre: la tolerancia llega por su cuenta.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+enum FitArg {
+    /// La escalera literal del contorno.
+    Pixel,
+    /// Segmentos rectos, quitando los vértices que no dibujan nada.
+    Polygon,
+}
+
+impl Common {
+    fn fit(&self) -> Fit {
+        match self.fit {
+            FitArg::Pixel => Fit::Pixel,
+            FitArg::Polygon => Fit::Polygon {
+                tolerance: self.fit_tolerance.max(0.0),
+            },
+        }
+    }
 }
 
 #[derive(Args)]
@@ -108,6 +143,7 @@ impl Pixelart {
         };
         Config {
             background: self.common.background.clone(),
+            fit: self.common.fit(),
             ..Config::grid(grid)
         }
     }
@@ -198,6 +234,7 @@ impl Photo {
         };
         Config {
             background: self.common.background.clone(),
+            fit: self.common.fit(),
             ..Config::cluster(cluster)
         }
     }

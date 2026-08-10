@@ -44,8 +44,16 @@ lienzo 662x1079, 1099 regiones
 37 colores, 1099 paths, 1521 subtrazados -> label.svg (107.6 KB)
 ```
 
-Both still trace axis-aligned outlines; the curve fitters are
-[not built yet](docs/curves.md).
+`--fit` is shared by both, because how a contour becomes path data is a separate
+decision from how the image becomes regions. `pixel` writes the staircase of
+pixel edges literally; `polygon` straightens it into segments, which takes 12–30%
+off the file depending on the tolerance:
+
+```sh
+./target/release/img2svg photo label.png --fit polygon
+```
+
+Curve fitting — `spline` — is [not built yet](docs/curves.md).
 
 When an image comes out wrong it is nearly always the grid: check the cell size
 in the report and pin it by hand with `--scale`. Full option list in

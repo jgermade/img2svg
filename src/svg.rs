@@ -5,7 +5,7 @@
 //! vectorial en vez de tener una sola figura por color repartida por todo el
 //! dibujo.
 
-use crate::fit::{self, Fit};
+use crate::fit::{Fit, Fitted};
 use crate::region::Regions;
 
 pub struct Options {
@@ -29,6 +29,12 @@ pub struct Output {
 pub fn render(regions: &Regions, opts: &Options) -> Output {
     let (w, h) = (regions.width as i64, regions.height as i64);
     let scale = opts.pixel_size.max(1) as i64;
+
+    // Se ajustan **todos** los tramos antes de ensamblar ningún anillo: una
+    // frontera compartida se ajusta una sola vez y sus dos caras reciben lo
+    // mismo. Ver [`crate::fit`], que es donde se explica por qué el orden no
+    // puede ser el otro.
+    let fitted = Fitted::new(regions, opts.fit);
 
     let mut body = String::new();
     if let Some(bg) = &opts.background {
@@ -57,7 +63,7 @@ pub fn render(regions: &Regions, opts: &Options) -> Output {
                 let d: String = region
                     .rings
                     .iter()
-                    .map(|ring| fit::ring_data(regions, ring, opts.fit))
+                    .map(|ring| fitted.ring_data(ring))
                     .collect();
                 // El relleno par-impar sólo hace falta cuando la región tiene
                 // agujeros, es decir, cuando trae más de un anillo.
@@ -92,9 +98,19 @@ pub fn render(regions: &Regions, opts: &Options) -> Output {
         }
     }
 
+    // `crispEdges` apaga el suavizado, que es lo que quiere una escalera sobre
+    // coordenadas enteras: los bordes salen limpios en vez de medio grises. En
+    // cuanto hay un tramo oblicuo hace lo contrario —deja la diagonal
+    // escalonada, que es exactamente lo que el ajuste acaba de quitar—, así que
+    // depende del ajuste y no del documento.
+    let rendering = match opts.fit {
+        Fit::Pixel => " shape-rendering=\"crispEdges\"",
+        Fit::Polygon { .. } => "",
+    };
+
     let svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" \
-viewBox=\"0 0 {w} {h}\" shape-rendering=\"crispEdges\">\n{body}</svg>\n",
+viewBox=\"0 0 {w} {h}\"{rendering}>\n{body}</svg>\n",
         w * scale,
         h * scale
     );

@@ -24,12 +24,48 @@ near-identical colours and traces the outline of every region.
 These do not depend on the segmentation and will be the same on every
 subcommand.
 
-| Option | Description |
-| --- | --- |
-| `<INPUT>` | Input image. PNG, JPEG, GIF, BMP or WebP. |
-| `-o, --output <FILE>` | Output file. Defaults to the input with an `.svg` extension. |
-| `-b, --background <COLOUR>` | Adds a background rectangle, e.g. `"#ffffff"`. |
-| `-q, --quiet` | Silences the report on stderr. |
+| Option | Default | Description |
+| --- | --- | --- |
+| `<INPUT>` | | Input image. PNG, JPEG, GIF, BMP or WebP. |
+| `-o, --output <FILE>` | input`.svg` | Output file. |
+| `-b, --background <COLOUR>` | none | Adds a background rectangle, e.g. `"#ffffff"`. |
+| `--fit <pixel\|polygon>` | `pixel` | How a contour becomes path data. See below. |
+| `--fit-tolerance <N>` | `0.75` | Maximum deviation in pixels, for `--fit polygon`. |
+| `-q, --quiet` | off | Silences the report on stderr. |
+
+### `--fit`, the other axis
+
+The subcommand chooses how the image becomes regions; `--fit` chooses how a
+region's contour becomes path data. They are independent, which is why this one
+is shared.
+
+`pixel` writes the contour literally, as the staircase of pixel edges it is.
+`polygon` runs Ramer–Douglas–Peucker over it and keeps only the vertices that
+draw something, so a 45° staircase becomes one straight segment. On the corpus
+images that is 12% off the file at the default tolerance and 30% at `1.5`:
+
+| `--fit-tolerance` | vertices | SVG |
+| --- | --- | --- |
+| `pixel` | 30,231 | 117 KB |
+| `0` | 30,231 | 117 KB |
+| **`0.75` (default)** | **19,261** | **103 KB** |
+| `1.0` | 12,036 | 85 KB |
+| `1.5` | 10,943 | 82 KB |
+| `3.0` | 9,059 | 76 KB |
+
+The tolerance is a deviation in pixels, and 0.707 is the number that governs it:
+that is how far the step of a 45° staircase sits from its own chord, so below it
+nothing straightens at all, and `0` reproduces `pixel` exactly. The default sits
+just above.
+
+What it does **not** promise is that a feature taller than the tolerance
+survives. RDP measures against whatever chord the recursion currently holds, not
+against the vertex's neighbours, so a chord coming from far away swallows a
+one-pixel bump that on its own would sit 1.0 away. The only guarantee is the
+ceiling: no point of the contour ends up further than the tolerance from what
+gets drawn.
+
+Curve fitting — `spline` — is [not built yet](curves.md).
 
 ### Pixel art options
 

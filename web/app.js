@@ -41,6 +41,10 @@ const ui = {
   removeChecker: $("removeChecker"),
   removeBackground: $("removeBackground"),
   mergeColors: $("mergeColors"),
+  fit: $("fit"),
+  fitTolerance: $("fitTolerance"),
+  fitToleranceField: $("fitToleranceField"),
+  fitToleranceOut: $("fitToleranceOut"),
 
   photoTolerance: $("photoTolerance"),
   photoToleranceOut: $("photoToleranceOut"),
@@ -59,6 +63,10 @@ const ui = {
   photoUseBackground: $("photoUseBackground"),
   photoBackground: $("photoBackground"),
   photoRemoveBackground: $("photoRemoveBackground"),
+  photoFit: $("photoFit"),
+  photoFitTolerance: $("photoFitTolerance"),
+  photoFitToleranceField: $("photoFitToleranceField"),
+  photoFitToleranceOut: $("photoFitToleranceOut"),
 
   download: $("download"),
   copy: $("copy"),
@@ -235,6 +243,14 @@ async function load(blob, name) {
 
 /* ------------------------------------------------------------- conversión --- */
 
+// El ajuste es el eje que **no** depende de la segmentación, así que los dos
+// modos mandan exactamente las mismas dos claves y las leen los dos lectores.
+function fitOptions(select, tolerance) {
+  return select.value === "polygon"
+    ? { fit: "polygon", fitTolerance: Number(tolerance.value) }
+    : { fit: "pixel" };
+}
+
 function pixelartOptions() {
   const opts = {
     tolerance: Number(ui.tolerance.value),
@@ -242,6 +258,7 @@ function pixelartOptions() {
     removeCheckerboard: ui.removeChecker.checked,
     removeBackground: ui.removeBackground.checked,
     mergeColors: ui.mergeColors.checked,
+    ...fitOptions(ui.fit, ui.fitTolerance),
   };
   if (!ui.autoScale.checked && Number(ui.scale.value) >= 1) {
     opts.scale = Number(ui.scale.value);
@@ -264,6 +281,7 @@ function photoOptions() {
     colorPrecision: Number(ui.colorPrecision.value),
     alphaThreshold: Number(ui.photoAlpha.value),
     removeBackground: ui.photoRemoveBackground.checked,
+    ...fitOptions(ui.photoFit, ui.photoFitTolerance),
   };
   if (ui.capColors.checked && Number(ui.maxColors.value) >= 2) {
     opts.maxColors = Number(ui.maxColors.value);
@@ -486,6 +504,32 @@ ui.background.addEventListener("input", schedule);
 ui.removeChecker.addEventListener("change", convert);
 ui.removeBackground.addEventListener("change", convert);
 ui.mergeColors.addEventListener("change", convert);
+
+// La desviación sólo la lee el polígono, así que con la escalera se esconde en
+// vez de quedarse ahí sin hacer nada.
+function syncFit(select, field) {
+  field.hidden = select.value !== "polygon";
+}
+
+for (const [select, field, tolerance, out] of [
+  [ui.fit, ui.fitToleranceField, ui.fitTolerance, ui.fitToleranceOut],
+  [
+    ui.photoFit,
+    ui.photoFitToleranceField,
+    ui.photoFitTolerance,
+    ui.photoFitToleranceOut,
+  ],
+]) {
+  syncFit(select, field);
+  select.addEventListener("change", () => {
+    syncFit(select, field);
+    convert();
+  });
+  tolerance.addEventListener("input", () => {
+    out.textContent = tolerance.value;
+    schedule();
+  });
+}
 
 // Los dos paneles tienen sus propios botones —cada `<aside>` es el suyo— y
 // hacen exactamente lo mismo sobre el último SVG generado.

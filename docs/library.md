@@ -26,7 +26,7 @@ same pipeline, so they combine freely.
 ```rust
 pub struct Config {
     pub segmentation: Segmentation,   // Grid(GridOptions) | Cluster(ClusterOptions)
-    pub fit: Fit,                     // Pixel
+    pub fit: Fit,                     // Pixel | Polygon { tolerance }
     pub background: Option<String>,   // belongs to neither axis
 }
 ```
@@ -88,7 +88,26 @@ exists.
 | `palette: Vec<Rgba>` | empty | An imposed palette. Non-empty means exactly this palette, nothing added. |
 | `remove_background: bool` | `false` | Clear the flat background and crop. |
 
-`Fit::Polygon` and `Fit::Spline` are [not built yet](curves.md).
+### `Fit`
+
+The other axis, and the one that combines with either segmentation.
+
+| Variant | Meaning |
+| --- | --- |
+| `Fit::Pixel` | The literal staircase of pixel edges, in `h`/`v` commands. The default. |
+| `Fit::Polygon { tolerance }` | Straight segments, keeping only the vertices that draw something (Ramer–Douglas–Peucker). `Fit::polygon()` is the default tolerance, `Fit::POLYGON_TOLERANCE` = 0.75 px. |
+
+`tolerance` is a maximum deviation in pixels: no point of the contour ends up
+further than that from what gets drawn, and `0.0` reproduces `Fit::Pixel`
+exactly. Below 0.707 nothing straightens at all — that is how far a 45°
+staircase step sits from its own chord. See [the CLI reference](cli.md#--fit-the-other-axis)
+for the measured trade-off.
+
+`Fit::Spline` is [not built yet](curves.md).
+
+Fitting happens **once per half-edge**, before rings are assembled, so the two
+faces of a shared boundary get identical geometry. `fit::Fitted` is the type that
+enforces the order: build it from the whole `Regions`, then ask it for a ring.
 
 ## The intermediate representation
 

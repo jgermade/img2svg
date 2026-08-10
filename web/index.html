@@ -181,6 +181,32 @@
                 comparte color, esté donde esté.
               </small>
             </label>
+
+            <label class="field">
+              <span>Contorno</span>
+              <select id="fit">
+                <option value="pixel" selected>Escalera de píxel</option>
+                <option value="polygon">Polígono simplificado</option>
+              </select>
+              <small>
+                En pixel art la escalera <em>es</em> el dibujo, así que lo normal
+                es dejarla. El polígono endereza las diagonales, que aquí son
+                escalones a propósito.
+              </small>
+            </label>
+
+            <label class="field" id="fitToleranceField" hidden>
+              <span>Desviación máxima <b id="fitToleranceOut">0.75</b> px</span>
+              <input
+                id="fitTolerance"
+                type="range"
+                min="0.25"
+                max="3"
+                step="0.05"
+                value="0.75"
+              />
+              <small>Cuánto puede apartarse la línea del contorno original.</small>
+            </label>
           </details>
 
           <div class="actions">
@@ -227,6 +253,35 @@
             <small>
               Ensancha las bandas de un cielo fundiendo tonos que sólo se
               distinguen en luz. En un dibujo con volumen aplana el sombreado.
+            </small>
+          </label>
+
+          <label class="field">
+            <span>Contorno</span>
+            <select id="photoFit">
+              <option value="pixel" selected>Escalera de píxel</option>
+              <option value="polygon">Polígono simplificado</option>
+            </select>
+            <small>
+              El polígono junta en un tramo recto los escalones que no dibujan
+              nada: el mismo dibujo con bastante menos SVG.
+            </small>
+          </label>
+
+          <label class="field" id="photoFitToleranceField" hidden>
+            <span>Desviación máxima <b id="photoFitToleranceOut">0.75</b> px</span>
+            <input
+              id="photoFitTolerance"
+              type="range"
+              min="0.25"
+              max="3"
+              step="0.05"
+              value="0.75"
+            />
+            <small>
+              Cuánto puede apartarse la línea del contorno original. Por debajo
+              de 0.71 no se endereza ni una diagonal; subirla comprime más y va
+              redondeando las esquinas pequeñas.
             </small>
           </label>
 
@@ -327,8 +382,8 @@
           </details>
 
           <p class="hint">
-            Los contornos salen todavía a escalones: el ajuste de Béziers, que es
-            lo que convertirá cada contorno en curvas, aún no está.
+            Los contornos salen todavía en tramos rectos: el ajuste de Béziers,
+            que es lo que convertirá cada contorno en curvas, aún no está.
           </p>
 
           <div class="actions">

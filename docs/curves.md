@@ -1,11 +1,12 @@
 # The curves mode
 
-**Half of it ships; the curves do not.** Segmentation for photos is built, tested
-and reachable from all three surfaces — `Segmentation::Cluster` in the library,
-`img2svg photo` on the CLI, the Foto tab on the page — but every contour still
-comes out as an axis-aligned staircase, because the only fitter that exists is
-`pixel`. What is missing is the curve fitters. This page explains why it is a
-separate mode rather than a flag, what is built, and what it still needs.
+**Segmentation ships, and so does the first fitter; the curves do not.**
+Segmentation for photos is built, tested and reachable from all three surfaces —
+`Segmentation::Cluster` in the library, `img2svg photo` on the CLI, the Foto tab
+on the page — and contours no longer have to come out as staircases: `--fit
+polygon` straightens them into segments. What is missing is the *curve* fitter.
+This page explains why it is a separate mode rather than a flag, what is built,
+and what it still needs.
 
 ## Why it is not just an option
 
@@ -19,7 +20,7 @@ So `img2svg` has two orthogonal axes, the same decomposition VTracer uses:
 | --- | --- |
 | `grid` — the pixel art path above | `pixel` — the literal staircase, `h`/`v` |
 | `cluster` — colour clustering, for photos | `polygon` — simplified straight segments |
-| | `spline` — cubic Béziers |
+| | `spline` — cubic Béziers, *not built* |
 
 They compose. The interesting one is **`grid` + `spline`**: vectorising a sprite
 with smooth curves *after* recovering the grid, so the curves follow the art
@@ -199,6 +200,69 @@ speck sitting on the background merges into it and disappears with it. The other
 way round it would be left surrounded by transparency, with no neighbour to merge
 into, and would survive as a dot floating in the void.
 
+**Polygon fitting** (`fit.rs`). Ramer–Douglas–Peucker over each contour, keeping
+only the vertices that draw something. It stays in integers — RDP *selects*
+vertices from the polyline it is given, and those are lattice corners, so nothing
+new is invented and `Point` does not change. Floats and coordinate quantisation
+belong to the spline.
+
+The tolerance is a maximum deviation in pixels, and 0.707 is the number that
+governs it: that is how far the step of a 45° staircase sits from its own chord,
+so below it nothing straightens and `0` reproduces the pixel fitter byte for
+byte. On one corpus image, against 30,231 vertices and 117 KB unfitted:
+
+| tolerance | vertices | SVG |
+| --- | --- | --- |
+| **0.75 (default)** | **19,261** | **103 KB** |
+| 1.0 | 12,036 | 85 KB |
+| 1.5 | 10,943 | 82 KB |
+| 3.0 | 9,059 | 76 KB |
+
+Note where the knee is, and what it costs. Most of the win is between 0.75 and
+1.0, and it is not free: a shallow staircase — three across, one down — sits 0.95
+from its chord, and a genuine one-pixel bump on a straight edge sits 1.0. **RDP
+cannot tell them apart, because to it they are the same feature.** There is no
+tolerance that removes the artefact and keeps the detail; only context could
+separate them, and RDP does not see context. Hence the conservative default: the
+smallest value that does anything at all.
+
+Being precise about what the tolerance promises matters here, because the
+obvious reading is wrong. It does *not* mean a feature taller than the tolerance
+survives — RDP measures against whatever chord the recursion currently holds, not
+against the vertex's neighbours, so a chord coming from far away swallows a bump
+that on its own would sit 1.0 away. What it promises is the ceiling: no point of
+the contour ends up further than the tolerance from what gets drawn. That is what
+the test asserts.
+
+Two things it dragged in on the way, both from the plan's list for the spline,
+and one of them earlier than expected. `shape-rendering="crispEdges"` is now
+conditional on the fit: it is right for a staircase on integer coordinates and it
+would leave every oblique segment jagged — the exact staircase the fit had just
+removed. That was filed under the spline, but the polygon needs it too, because
+what breaks it is an oblique segment, not a curve. And the path writer, which
+only knew `h`/`v`, now emits `l` when a segment is neither.
+
+**The fit happens per half-edge, and the rings are assembled afterwards.** This
+is the seam handling below, and it was nearly lost at the last step. The fit used
+to run on the assembled ring, which with `pixel` on integer coordinates is
+invisible — collapsing collinear runs on either side of a node gives the same
+staircase — so nothing had caught it. RDP over an assembled ring is not
+invisible: it simplifies *through* the bifurcations, treating a node where three
+regions meet as an ordinary interior vertex and dropping it for looking straight.
+The two faces of a shared boundary would then be simplified inside two different
+rings, with different neighbours beyond the node, and come out disagreeing — the
+hairline the whole IR exists to prevent. The IR kept its promise and the last
+stage threw it away.
+
+So `fit::Fitted` fits every `EdgeId` once and only then chains rings out of
+fitted edges. One step still looks at the whole ring: dropping vertices that lie
+*exactly* on the line between their neighbours, which is what a node the boundary
+runs straight through leaves behind. That is not fitting, it is declining to
+write a point that draws nothing — the line is identical either way, so the two
+faces still agree even if one drops it and the other keeps it. `tests/fit.rs`
+checks the property directly on the emitted document: every interior segment is
+drawn by exactly two faces, with the same endpoints.
+
 One correction to the plan, which asked for a colour *tolerance* here on the
 grounds that exact comparison "never matches on a photo": it is not needed. Both
 paths unify near-equal colours before this runs — `reduce_palette` on the grid
@@ -215,33 +279,34 @@ these particular PNGs are pathologically noisy pixel art with 64k–159k distinc
 colours, so they compress badly. The case for the speck filter stood on path
 count, not on file size, and that is how it was judged.
 
-**Bézier fitting.** Simplifying each contour, detecting the corners so they stay
-sharp, and least-squares fitting curves to the rest. Until it lands, `photo`
-output is a staircase: correct, and three to four times the path data it needs.
+**Bézier fitting.** Detecting the corners so they stay sharp, estimating
+tangents, and least-squares fitting cubics to the rest, subdividing at the worst
+point. The polygon fitter got the plumbing right — per half-edge, endpoints
+fixed, `crispEdges` off the moment the contour is not axis-aligned — so what is
+left is the mathematics.
 
-Two things the fitters have to touch on the way. `shape-rendering="crispEdges"`
-is hardcoded in the `<svg>` element, which is right for a pixel staircase on
-integer coordinates and would alias every Bézier — it has to become conditional
-on the fit. And tangent continuity across a node is not guaranteed: each chain is
-fitted independently, so two chains meeting at a node agree on the point but not
-on the direction. At a three-region junction that is correct, it is a real
-corner; where it will show is a node that is geometrically smooth.
+One thing it will still have to solve on its own: tangent continuity across a
+node is not guaranteed. Each chain is fitted independently, so two chains meeting
+at a node agree on the point but not on the direction. At a three-region junction
+that is correct, it is a real corner; where it will show is a node that is
+geometrically smooth. The fix, if it turns out to matter, is to estimate the
+tangent at shared nodes once and hand it to both chains as a constraint — which
+the half-edge IR already makes possible, since both chains are right there.
 
 **Real progress on the page.** The photo path is loops over rows and regions, so
 unlike the sprite path it can report actual progress through a callback instead
 of the indeterminate bar it shows today.
 
-**Seam handling.** Two regions sharing a border must be fitted *once*, not once
-per face — otherwise the two fits disagree and a hairline of background shows
-through between them. This is why the intermediate representation has to carry
-half-edges rather than independent loops, and it has to be decided before the
-fitters are written, not after.
+**Seam handling** is done, and it turned out to be a matter of *when* as much as
+of *what*: the half-edge IR was the right type from the start, and the fitting
+stage was still about to undo it by simplifying assembled rings. See the polygon
+fitter above.
 
 ## Status
 
 What is left, and in what order, lives in the newest file in
 [`SESSIONS/`](../SESSIONS/) — currently
-[`2026-08-10-11h00.remaining-before-the-fitters.md`](../SESSIONS/2026-08-10-11h00.remaining-before-the-fitters.md).
+[`2026-08-10-11h31.polygon-fitting.md`](../SESSIONS/2026-08-10-11h31.polygon-fitting.md).
 The original decision is in
 [`2026-08-09-10h00.img2svg-two-axes.md`](../SESSIONS/2026-08-09-10h00.img2svg-two-axes.md);
 the files between the two record how each stage was reasoned about, including

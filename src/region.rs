@@ -73,29 +73,38 @@ pub struct Regions {
 }
 
 impl Regions {
-    /// Encadena los puntos de un anillo. El primero no se repite al final: el
-    /// cierre es implícito.
+    /// Encadena los puntos de un anillo tal como salieron de la segmentación.
     pub fn ring_points(&self, ring: &Ring) -> Vec<Point> {
-        let mut out: Vec<Point> = Vec::new();
-        for &(edge, reversed) in ring {
-            let points = &self.edges[edge].points;
-            let mut it: Box<dyn Iterator<Item = &Point>> = if reversed {
-                Box::new(points.iter().rev())
-            } else {
-                Box::new(points.iter())
-            };
-            // El primer punto de un tramo es el último del anterior.
-            if !out.is_empty() {
-                it.next();
-            }
-            out.extend(it.copied());
-        }
-        // Y el último punto del anillo es otra vez el primero, porque el tramo
-        // que lo cierra acaba donde empezó el primero. Se descarta aquí, en un
-        // solo sitio, en vez de que cada ajustador tenga que acordarse.
-        if out.len() > 1 && out.last() == out.first() {
-            out.pop();
-        }
-        out
+        chain(ring, |edge| self.edges[edge].points.as_slice())
     }
+}
+
+/// Encadena los puntos de un anillo a partir de los tramos que se le den. El
+/// primero no se repite al final: el cierre es implícito.
+///
+/// Los tramos llegan por parámetro en vez de leerse de `edges` porque el ajuste
+/// ensambla los suyos, que son otros ([`crate::fit::Fitted`]). La regla de qué
+/// punto se repite y dónde vive aquí, en un solo sitio, y no una vez por
+/// ajustador.
+pub fn chain<'a>(ring: &Ring, points: impl Fn(EdgeId) -> &'a [Point]) -> Vec<Point> {
+    let mut out: Vec<Point> = Vec::new();
+    for &(edge, reversed) in ring {
+        let edge = points(edge);
+        let mut it: Box<dyn Iterator<Item = &Point>> = if reversed {
+            Box::new(edge.iter().rev())
+        } else {
+            Box::new(edge.iter())
+        };
+        // El primer punto de un tramo es el último del anterior.
+        if !out.is_empty() {
+            it.next();
+        }
+        out.extend(it.copied());
+    }
+    // Y el último punto del anillo es otra vez el primero, porque el tramo que
+    // lo cierra acaba donde empezó el primero.
+    if out.len() > 1 && out.last() == out.first() {
+        out.pop();
+    }
+    out
 }
