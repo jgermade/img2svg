@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "logo": "node -e \"import('node:fs').then(fs => fs.copyFileSync('../img2svg.svg', 'static/img2svg.svg'))\"",
+    "logo": "node -e \"import('node:fs').then(fs => { fs.mkdirSync('static', { recursive: true }); fs.copyFileSync('../img2svg.svg', 'static/img2svg.svg') })\"",
     "predev": "npm run logo",
     "dev": "vite",
     "prebuild": "npm run logo",

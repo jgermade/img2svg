@@ -25,6 +25,10 @@
 
 # `web/static` es el publicDir de Vite: el logotipo lo deja ahí `npm run logo`,
 # copiándolo de la raíz, así que el original manda y la copia no se versiona.
+#
+# Como es el único fichero del directorio, en un clon limpio `web/static` no
+# existe —git no versiona directorios vacíos—, y por eso `npm run logo` lo crea
+# antes de copiar en vez de dar por hecho que está.
 /web/static/img2svg.svg
 
 # El sitio construido.
