@@ -7,10 +7,12 @@
 //! del damero, cosas que un dibujo sintético limpio no toca.
 //!
 //! `examples/` está en `.gitignore` y los PNG pesan 9 MB, así que **la entrada
-//! no está versionada y la salida sí**: si las imágenes no están, estos tests se
-//! saltan con un aviso en vez de fallar —o fallan, si se pone `REQUIRE_CORPUS`—.
-//! La huella FNV de cada fichero va en la cabecera de la instantánea para que un
-//! cambio de entrada se distinga de una regresión del código.
+//! no está versionada y la salida sí**: las imágenes cuelgan de una release
+//! propia, `corpus-v1`, y se bajan con `scripts/corpus.sh`. Si no están, estos
+//! tests se saltan con un aviso en vez de fallar —o fallan, si se pone
+//! `REQUIRE_CORPUS`, que es lo que hace CI—. La huella FNV de cada fichero va en
+//! la cabecera de la instantánea para que un cambio de entrada se distinga de
+//! una regresión del código.
 
 #![cfg(feature = "formats")]
 
@@ -35,8 +37,8 @@ fn examples_dir() -> PathBuf {
 ///
 /// Saltarse un test lo deja en verde, así que sin las imágenes estos casos
 /// pasarían sin haber comprobado nada y el log de CI lo contaría como éxito. Con
-/// `REQUIRE_CORPUS` puesto, faltar es un fallo: es lo que hay que activar el día
-/// que las imágenes sean alcanzables desde un clon limpio.
+/// `REQUIRE_CORPUS` puesto, faltar es un fallo: es lo que pone CI, donde
+/// `scripts/corpus.sh` las deja siempre en su sitio antes de los tests.
 fn load(file: &str) -> Option<Vec<u8>> {
     let path = examples_dir().join(file);
     match std::fs::read(&path) {
@@ -48,7 +50,7 @@ fn load(file: &str) -> Option<Vec<u8>> {
         Err(_) => {
             eprintln!(
                 "SALTADO: falta {}.\n  \
-                 El corpus no está versionado (examples/ está en .gitignore).",
+                 El corpus no está versionado: bájalo con scripts/corpus.sh",
                 path.display()
             );
             None

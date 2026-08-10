@@ -49,14 +49,28 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      # Las tres imágenes de `tests/corpus.rs` pesan 9 MB y no están en el
+      # repositorio: cuelgan de la release `corpus-v1`. Sin ellas esos tests se
+      # saltan solos, que en un log de CI se lee igual que pasar.
+      - name: Corpus
+        run: scripts/corpus.sh
+        env:
+          CORPUS_REPO: ${{ github.repository }}
+
       # En debug, porque release apaga los checks de desbordamiento: un `1 - x`
       # sobre un u8 que se da la vuelta pasa desapercibido en release y aquí no.
+      # `REQUIRE_CORPUS` convierte un corpus ausente en un fallo: aquí siempre
+      # tiene que estar, y si el paso de arriba dejara de traerlo hay que verlo.
       - name: Tests
         run: cargo test
+        env:
+          REQUIRE_CORPUS: 1
 
       # Y en release, que es lo que se publica.
       - name: Tests (release)
         run: cargo test --release
+        env:
+          REQUIRE_CORPUS: 1
 
       - uses: jetli/wasm-pack-action@v0.4.0
 

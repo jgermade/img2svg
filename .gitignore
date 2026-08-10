@@ -4,6 +4,9 @@
 *.pdb
 
 /.claude
+
+# El corpus de tests: 9 MB de PNG que cuelgan de la release `corpus-v1` y que
+# `scripts/corpus.sh` deja aquí.
 /examples
 
 # Generados al publicar la web: wasm-pack compila el paquete y el workflow

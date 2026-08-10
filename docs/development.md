@@ -79,20 +79,42 @@ On a mismatch the actual output is dumped alongside as `*.actual` for a real
 
 ### The corpus
 
-`examples/` is not versioned — the three PNGs weigh 9 MB — so `tests/corpus.rs`
-skips with a notice when they are absent. Their *output* snapshots are committed,
-so the regression signal is in git even though the inputs are local, and each
-header carries the input's FNV hash to tell a changed image apart from a code
-regression.
+`examples/` is not versioned — the three PNGs weigh 9 MB — so they hang off a
+release of their own, `corpus-v1`, and come down with:
 
-Set `REQUIRE_CORPUS=1` to turn a missing corpus into a failure instead of a
-silent pass.
+```sh
+scripts/corpus.sh
+```
+
+That release is not a version of the program: nothing about it moves when a
+`v0.x` ships, it is not marked as latest, and the script pins it by tag rather
+than following the newest one. The day the corpus changes it takes a new tag, the
+tag changed in the script, and the snapshots regenerated in the same commit:
+
+```sh
+scripts/corpus-release.sh corpus-v2
+```
+
+It packs the images `scripts/corpus.sha256` names, straight out of `examples/`,
+and refuses to publish when they do not match those checksums. There is no
+archive to hand it on purpose: that list is what the fetch script verifies and
+what the tests read, so the only thing publishable is what the repository already
+calls the corpus. It wants a token with `Contents: write`.
+
+The script checks the unpacked PNGs against `scripts/corpus.sha256` and fetches
+again when they do not match; without them `tests/corpus.rs` skips with a notice.
+Their *output* snapshots are committed, so the regression signal is in git even
+though the inputs are not, and each header carries the input's FNV hash to tell a
+changed image apart from a code regression.
+
+`REQUIRE_CORPUS=1` turns a missing corpus into a failure instead of a silent
+pass. CI sets it, having fetched the corpus a step earlier.
 
 ## CI
 
-**`build.yml`** runs on every push to `main`: format, clippy, tests in debug and
-release, and the wasm build. It publishes nothing — it just leaves the built
-`web/` as an artifact.
+**`build.yml`** runs on every push to `main`: format, clippy, the corpus fetch,
+tests in debug and release, and the wasm build. It publishes nothing — it just
+leaves the built `web/` as an artifact.
 
 Tests run in debug *as well as* release because release turns overflow checks
 off — that is exactly how a `u8` underflow in `checker.rs` survived unnoticed.
