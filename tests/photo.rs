@@ -252,6 +252,72 @@ fn el_poligono_dibuja_lo_mismo_con_menos_datos() {
     check("foto-poligono", &out, "dibujo, fit = polygon (0.75)");
 }
 
+/// Y el de curvas, que es el único que inventa puntos que no estaban en la
+/// retícula: sus controles no los fija ningún otro test byte a byte.
+///
+/// Con **dibujo propio**, y no con el de arriba: ese es todo bloques y bandas
+/// horizontales, así que el ajuste de curvas no encuentra nada que curvar y la
+/// instantánea saldría sin una sola `c`, fijando exactamente nada. Dos discos
+/// que se solapan dan lo que hace falta: contorno curvo, y una frontera curva
+/// compartida por dos regiones.
+///
+/// La instantánea es aquí la red que importa. Las propiedades —la costura, el
+/// techo de la tolerancia, que un rectángulo no se redondee— viven en
+/// `tests/fit.rs` y seguirían pasando aunque una reparametrización cambiara de
+/// resultado; esto dice si ha cambiado.
+#[test]
+fn las_curvas_se_quedan_donde_estan() {
+    let (w, h) = (72usize, 56usize);
+    let discos = [
+        (28.0f64, 28.0f64, 20.0f64, [200u8, 60, 60, 255]),
+        (46.0, 30.0, 18.0, [60, 110, 200, 255]),
+    ];
+    let mut buf = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let mut color = [245u8, 245, 240, 255];
+            for &(cx, cy, r, c) in &discos {
+                if ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt() <= r {
+                    color = c;
+                }
+            }
+            buf.extend_from_slice(&color);
+        }
+    }
+
+    let config = Config {
+        fit: Fit::spline(),
+        ..Config::cluster(ClusterOptions::default())
+    };
+    let out = img2svg::convert_rgba(w as u32, h as u32, &buf, &config)
+        .expect("la conversión no debe fallar");
+
+    // Contando comandos dentro de los `d`, no letras sueltas del documento: la
+    // primera versión de esto miraba `svg.contains('c')`, y la `c` de «colores»
+    // de la cabecera la daba por buena.
+    let curvas: usize = out
+        .svg
+        .split("d=\"")
+        .skip(1)
+        .map(|rest| {
+            rest[..rest.find('"').expect("un atributo d sin cerrar")]
+                .matches('c')
+                .count()
+        })
+        .sum();
+    assert!(curvas > 0, "sin una sola curva no se está fijando nada");
+    assert!(
+        !out.svg.contains("crispEdges"),
+        "con curvas el suavizado tiene que estar puesto"
+    );
+
+    check(
+        "foto-curvas",
+        &out,
+        &format!("dos discos, fit = spline (1.5), {curvas} curvas"),
+    );
+}
+
 /// Sin retirarlo, el mismo dibujo conserva el margen entero: fija el contraste
 /// con el caso anterior.
 #[test]

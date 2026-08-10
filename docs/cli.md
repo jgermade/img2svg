@@ -77,7 +77,7 @@ one-pixel bump that on its own would sit 1.0 away. The only guarantee is the
 ceiling: no point of the contour ends up further than the tolerance from what
 gets drawn.
 
-Curve fitting — `spline` — is [not built yet](curves.md).
+The same ceiling is all `spline` promises too.
 
 ### Pixel art options
 
