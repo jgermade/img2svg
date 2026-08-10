@@ -241,7 +241,7 @@ fitters are written, not after.
 
 What is left, and in what order, lives in the newest file in
 [`SESSIONS/`](../SESSIONS/) — currently
-[`2026-08-10-01h40.remaining-after-wiring.md`](../SESSIONS/2026-08-10-01h40.remaining-after-wiring.md).
+[`2026-08-10-11h00.remaining-before-the-fitters.md`](../SESSIONS/2026-08-10-11h00.remaining-before-the-fitters.md).
 The original decision is in
 [`2026-08-09-10h00.img2svg-two-axes.md`](../SESSIONS/2026-08-09-10h00.img2svg-two-axes.md);
 the files between the two record how each stage was reasoned about, including
