@@ -25,17 +25,50 @@ cargo clippy --all-targets
 
 ## The web build
 
+The page is a Vite + Preact project rooted at [`web/`](../web). The wasm is a
+**build input** to it, so it goes first:
+
 ```sh
 wasm-pack build --release --target web \
   --out-dir web/pkg --out-name img2svg \
   -- --no-default-features --features wasm,photo
 
-cp img2svg.svg web/
-python3 -m http.server 8765 --directory web
+cd web
+npm install
+npm run dev            # servidor de desarrollo
+npm run build          # sitio estático en web/dist
+npm run preview        # sirve lo construido
+npm run lint           # oxlint
 ```
 
-The wasm must be served over HTTP — opening `web/index.html` from the filesystem
-will not work, because the page loads a module worker.
+The wasm must be served over HTTP — opening the HTML from the filesystem will not
+work, because the page loads a module worker. The dev server takes care of that;
+there is no longer any reason to reach for `python3 -m http.server`.
+
+`npm run build` runs `npm run logo` first, which copies `img2svg.svg` from the
+repository root into `web/static/`. That directory is Vite's `publicDir`: what is
+in it is served as-is and referenced by URL. Everything else is imported, and
+therefore hashed and fingerprinted by the bundler — including `web/pkg/`, which
+is why the wasm package is **not** in `static/`.
+
+`base` is `"./"` in [`web/vite.config.js`](../web/vite.config.js). Pages serves
+the site from `/img2svg/`, not from a domain root, and the default `/` would
+produce a build that works locally and 404s every asset in production.
+
+### The layout
+
+| Folder | What is in it |
+| --- | --- |
+| `web/static` | copied verbatim, served by URL, never imported (the logo) |
+| `web/assets` | imported and hashed (the stylesheet) |
+| `web/components` | presentational only; they import nothing but each other |
+| `web/services` | the worker, the converter store, formatting helpers |
+| `web/views` | the shell and the two panels; may use components and services |
+| `web/pkg` | wasm-pack output: generated, ignored, imported |
+
+`web/services/converter.js` is the only module that talks to the worker. The
+views read its signals and call `load`, `convert` and `reset`; none of them knows
+there are messages, request ids or a debounce timer.
 
 `--no-default-features` is deliberate: the browser decodes the image, so the Rust
 image codecs are half a megabyte of dead weight in the bundle.
@@ -81,9 +114,9 @@ has no image codecs in it (the browser decodes), so a PNG would be no use here.
 It checks the three things the Rust tests structurally cannot:
 
 1. the wasm boots and returns an SVG;
-2. **every field `web/worker.js` copies** is still there — that object is the
-   real coupling between page and wasm, and a renamed getter shows up there as
-   `undefined` rather than as an error;
+2. **every field `web/services/worker.js` copies** is still there — that object
+   is the real coupling between page and wasm, and a renamed getter shows up
+   there as `undefined` rather than as an error;
 3. **the option keys are read.** They come out of a `Reflect::get` by string, so
    a typo does not fail, it quietly takes the default. The committed `.d.ts`
    freezes the *declared* shape of the API; this is what says it is also wired.

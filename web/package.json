@@ -1,0 +1,23 @@
+{
+  "name": "img2svg-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "logo": "node -e \"import('node:fs').then(fs => fs.copyFileSync('../img2svg.svg', 'static/img2svg.svg'))\"",
+    "predev": "npm run logo",
+    "dev": "vite",
+    "prebuild": "npm run logo",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "oxlint"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.0.0",
+    "preact": "^10.24.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.9.0",
+    "oxlint": "^1.0.0",
+    "vite": "^7.0.0"
+  }
+}

@@ -12,7 +12,7 @@
 // Qué comprueba, y por qué cada cosa:
 //
 //   1. Que sale un SVG. Es el humo: si el wasm no arranca, aquí se ve.
-//   2. Que están **todos los campos que copia `web/worker.js`**. Ese objeto es
+//   2. Que están **todos los campos que copia `web/services/worker.js`**. Ese objeto es
 //      el acoplamiento real entre la página y el wasm, y un getter renombrado
 //      no da error ahí: da `undefined`, que llega a la página como un hueco.
 //   3. Que las **claves de opciones se leen**. `read_config` las saca por
@@ -31,7 +31,7 @@ const root = new URL("..", import.meta.url);
 const pkg = new URL("web/pkg/", root);
 
 /**
- * Campos que `web/worker.js` copia de cada resultado, uno por segmentación.
+ * Campos que `web/services/worker.js` copia de cada resultado, uno por segmentación.
  *
  * Los `opcionales` valen `undefined` de pleno derecho —no hay damero, no hay
  * fondo que quitar—, así que de ésos sólo se puede exigir que el getter siga

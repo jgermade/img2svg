@@ -326,8 +326,9 @@ fn read_fit(o: &Options) -> Fit {
 /// Lector del objeto plano que manda la página.
 ///
 /// Las claves son deliberadamente **planas** y no reflejan la partición interna
-/// en segmentación y ajuste: son la API pública que consume `web/app.js`, y
-/// cambiarlas rompería la página sin avisar en tiempo de compilación.
+/// en segmentación y ajuste: son la API pública que consume
+/// `web/views/modes.jsx`, y cambiarlas rompería la página sin avisar en tiempo
+/// de compilación.
 struct Options<'a>(&'a JsValue);
 
 impl Options<'_> {

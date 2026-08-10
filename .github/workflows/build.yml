@@ -74,6 +74,14 @@ jobs:
 
       - uses: jetli/wasm-pack-action@v0.4.0
 
+      # La página es un proyecto de Vite con raíz en `web/`, y el wasm es una
+      # **entrada** suya: se compila primero y luego se empaqueta el sitio.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
       - name: Compilar a WebAssembly
         run: >
           wasm-pack build --release --target web
@@ -98,14 +106,26 @@ jobs:
       - name: Ejercer el wasm desde JavaScript
         run: node scripts/web-smoke.mjs
 
-      - name: Copiar el logotipo
-        run: cp img2svg.svg web/
+      - name: Dependencias de la web
+        run: npm ci
+        working-directory: web
 
-      # release.yml lo recoge de aquí, para desplegarlo y para adjuntarlo.
+      - name: Lint de la web
+        run: npm run lint
+        working-directory: web
+
+      # `prebuild` copia el logotipo de la raíz a `web/static/`, así que aquí no
+      # hay ningún `cp`: local y CI construyen exactamente igual.
+      - name: Construir el sitio
+        run: npm run build
+        working-directory: web
+
+      # release.yml lo recoge de aquí, para desplegarlo y para adjuntarlo. Es el
+      # sitio construido, no el código fuente de la página.
       - name: Guardar el paquete web
         uses: actions/upload-artifact@v7
         with:
           name: web
-          path: web/
+          path: web/dist/
           if-no-files-found: error
           retention-days: 7

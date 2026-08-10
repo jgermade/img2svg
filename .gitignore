@@ -22,7 +22,15 @@
 # sobre éste. Una vez seguido, las reglas de ignorados ya no le afectan.
 /web/pkg/*
 !/web/pkg/img2svg.d.ts
-/web/img2svg.svg
+
+# `web/static` es el publicDir de Vite: el logotipo lo deja ahí `npm run logo`,
+# copiándolo de la raíz, así que el original manda y la copia no se versiona.
+/web/static/img2svg.svg
+
+# El sitio construido.
+/web/dist/
+
+node_modules/
 
 # Volcado de una instantánea que no cuadra, para poder hacerle un diff.
 /tests/golden/*.actual
