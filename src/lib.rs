@@ -35,6 +35,8 @@ pub mod segment;
 pub mod smooth;
 #[cfg(feature = "photo")]
 pub mod speckle;
+#[cfg(feature = "photo")]
+pub mod subpixel;
 pub mod svg;
 pub mod trace;
 
@@ -531,7 +533,10 @@ fn convert_cluster(
 ) -> Conversion {
     let clustering = cluster::from_image_with(img, options, progress);
     progress.stage(Stage::Boundaries);
-    let regions = boundary::from_clustering(&clustering);
+    let mut regions = boundary::from_clustering(&clustering);
+    if options.subpixel {
+        subpixel::place(&mut regions, &clustering, img);
+    }
     progress.stage(Stage::Document);
 
     // Una unidad del `viewBox` es un píxel de la imagen, así que el SVG sale a

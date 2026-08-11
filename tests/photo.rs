@@ -230,8 +230,17 @@ fn fondo_retirado_y_recortado() {
 /// justo lo que una escalera describe mal.
 #[test]
 fn el_poligono_dibuja_lo_mismo_con_menos_datos() {
-    let escalera = convert(0, ClusterOptions::default());
-    let out = convert_con(0, ClusterOptions::default(), Fit::polygon());
+    // Sobre la retícula, que es donde la comparación tiene sentido: con el
+    // contorno subpíxel los dos ajustes dejan de dibujar la misma línea —uno la
+    // escalera de la retícula y otro el borde de verdad—, y entonces comparar sus
+    // tamaños no dice nada de la simplificación. Ese otro compromiso lo fija
+    // `el_subpixel_cuesta_bytes_y_compra_sitio`.
+    let sobre_reticula = ClusterOptions {
+        subpixel: false,
+        ..ClusterOptions::default()
+    };
+    let escalera = convert(0, sobre_reticula.clone());
+    let out = convert_con(0, sobre_reticula, Fit::polygon());
 
     assert_eq!(
         out.paths, escalera.paths,
@@ -250,6 +259,54 @@ fn el_poligono_dibuja_lo_mismo_con_menos_datos() {
     );
 
     check("foto-poligono", &out, "dibujo, fit = polygon (0.75)");
+}
+
+/// El compromiso del contorno subpíxel, fijado para que no se olvide.
+///
+/// Cuesta bytes **siempre**, y no por descuido: sobre la retícula un tramo
+/// horizontal se escribe `h` con un número porque sus dos extremos comparten la
+/// `y`, y en cuanto los vértices se salen de la retícula ese mismo tramo pasa a
+/// `l` con dos números y decimales. Lo que compra es sitio: los vértices caen
+/// donde la imagen dice que está el borde, que en un dibujo pequeño es la
+/// diferencia entre una lente redonda y un octógono.
+///
+/// El ajuste `pixel` no lo lee —es la escalera literal por definición—, y eso
+/// también se comprueba aquí: es lo que hace que las instantáneas de rejilla
+/// sigan valiendo.
+#[test]
+fn el_subpixel_cuesta_bytes_y_compra_sitio() {
+    let con = convert_con(0, ClusterOptions::default(), Fit::polygon());
+    let sin = convert_con(
+        0,
+        ClusterOptions {
+            subpixel: false,
+            ..ClusterOptions::default()
+        },
+        Fit::polygon(),
+    );
+    assert_eq!(con.paths, sin.paths, "no cambia en qué se parte el dibujo");
+    assert_eq!(con.colors, sin.colors, "ni la paleta");
+    assert!(
+        con.svg.len() > sin.svg.len(),
+        "sale más grande, que es lo que cuesta: {} contra {}",
+        con.svg.len(),
+        sin.svg.len()
+    );
+
+    // Y con el ajuste de escalera los dos son idénticos byte a byte, porque ése
+    // no mira el desplazamiento.
+    let escalera_con = convert(0, ClusterOptions::default());
+    let escalera_sin = convert(
+        0,
+        ClusterOptions {
+            subpixel: false,
+            ..ClusterOptions::default()
+        },
+    );
+    assert_eq!(
+        escalera_con.svg, escalera_sin.svg,
+        "`pixel` tiene que ignorar el subpíxel"
+    );
 }
 
 /// Y el de curvas, que es el único que inventa puntos que no estaban en la

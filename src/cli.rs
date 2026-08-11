@@ -92,13 +92,41 @@ enum FitArg {
     Spline,
 }
 
+/// La tolerancia con la que sale `photo` cuando endereza un contorno.
+///
+/// Es más estrecha que [`Fit::TOLERANCE`] y el motivo es geométrico, no de gusto.
+/// Sobre una retícula de píxeles la tolerancia tiene dos escalones y nada entre
+/// medias: a `0.5` se aplana un peldaño suelto, y a `raíz(2)/2 = 0.707` una
+/// escalera de 45 grados colapsa en su diagonal. Contando anclas en la portada:
+///
+/// | tolerancia | anclas | |
+/// | --- | --- | --- |
+/// | 0,49 | 11.464 | |
+/// | 0,50 | 11.419 | se aplanan los peldaños sueltos |
+/// | 0,70 | 8.997 | |
+/// | **0,71** | **7.704** | **−14,4%: colapsan las diagonales** |
+/// | 0,75 | 7.503 | |
+///
+/// El problema es que **el borde de un círculo pequeño es una sucesión de
+/// escaleras cortas de 45 grados**, así que ese mismo colapso que endereza un
+/// canto largo convierte una lente de gafas en un octógono. Sobre la retícula las
+/// dos cosas son localmente idénticas y ninguna tolerancia las distingue.
+///
+/// Así que por debajo del escalón, y la compresión que se deja ahí se recupera
+/// cuando los contornos dejen de estar clavados a la retícula —ver
+/// `SESSIONS/2026-08-11_12h45.off-the-pixel-lattice.md`—, que es el arreglo de
+/// verdad. En una imagen grande `--fit-tolerance 0.75` sigue siendo buen negocio:
+/// ahí un rasgo mide cientos de píxeles y no hay arco que perder.
+const PHOTO_POLYGON_TOLERANCE: f64 = 0.5;
+
 impl Common {
-    /// El ajustador pedido, o el que trae de fábrica la segmentación que llama.
-    fn fit(&self, default: FitArg) -> Fit {
+    /// El ajustador pedido, o el que trae de fábrica la segmentación que llama,
+    /// con la tolerancia que le toca a ese ajustador en esa segmentación.
+    fn fit(&self, default: FitArg, polygon_tolerance: f64) -> Fit {
         match self.fit.unwrap_or(default) {
             FitArg::Pixel => Fit::Pixel,
             FitArg::Polygon => Fit::Polygon {
-                tolerance: self.tolerance(Fit::TOLERANCE),
+                tolerance: self.tolerance(polygon_tolerance),
             },
             FitArg::Spline => Fit::Spline {
                 tolerance: self.tolerance(Fit::SPLINE_TOLERANCE),
@@ -169,8 +197,11 @@ impl Pixelart {
         };
         Config {
             background: self.common.background.clone(),
-            // La escalera de un sprite es el dibujo, no un artefacto.
-            fit: self.common.fit(FitArg::Pixel),
+            // La escalera de un sprite es el dibujo, no un artefacto. Y si aquí
+            // se pide polígono, una unidad es un píxel *del dibujo*, no de la
+            // imagen: los rasgos miden lo que tienen que medir y `Fit::TOLERANCE`
+            // vale tal cual.
+            fit: self.common.fit(FitArg::Pixel, Fit::TOLERANCE),
             ..Config::grid(grid)
         }
     }
@@ -194,6 +225,16 @@ struct Photo {
     /// distintos que no se ven.
     #[arg(short, long, default_value_t = ClusterOptions::default().color_precision)]
     color_precision: u8,
+
+    /// No busca el borde dentro del píxel: deja los vértices en la retícula.
+    ///
+    /// El contorno sale de recorrer grietas entre píxeles, así que sus vértices
+    /// caen en la retícula entera de la imagen. En un dibujo pequeño eso es lo
+    /// que decide el resultado: una lente de gafas de dieciséis píxeles no puede
+    /// ser redonda si sus vértices tienen que caer en esa retícula. El color de
+    /// los píxeles del borde dice por dónde corta de verdad, y eso los recoloca.
+    #[arg(long)]
+    no_subpixel: bool,
 
     /// Pasadas de regularización de la paleta mirando el vecindario (0 la apaga).
     ///
@@ -276,6 +317,7 @@ impl Photo {
         let cluster = ClusterOptions {
             color_precision: self.color_precision,
             tolerance: self.tolerance,
+            subpixel: !self.no_subpixel,
             smoothing: self.smoothing,
             alpha_threshold: self.alpha_threshold,
             filter_speckle: self.filter_speckle,
@@ -290,9 +332,10 @@ impl Photo {
         };
         Config {
             background: self.common.background.clone(),
-            // Aquí la escalera es sólo la retícula de píxeles, y enderezarla no
-            // cuesta dibujo: quita entre un 23% y un 32% del fichero.
-            fit: self.common.fit(FitArg::Polygon),
+            // Aquí la escalera es sólo la retícula de píxeles y enderezarla no
+            // cuesta dibujo, pero por debajo del escalón donde empieza a costarlo.
+            // Ver `PHOTO_POLYGON_TOLERANCE`.
+            fit: self.common.fit(FitArg::Polygon, PHOTO_POLYGON_TOLERANCE),
             ..Config::cluster(cluster)
         }
     }

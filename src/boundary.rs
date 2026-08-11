@@ -248,6 +248,10 @@ impl<'a> Cracks<'a> {
         };
         HalfEdge {
             points,
+            // Los pone [`crate::subpixel`] después, si se piden: aquí sólo se
+            // sabe de grietas, y dónde cae el borde dentro de un píxel es una
+            // pregunta para la imagen.
+            offsets: Vec::new(),
             left: left as usize,
             right: (right != NONE).then_some(right as usize),
         }

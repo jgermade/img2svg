@@ -9,7 +9,7 @@ import {
 } from "../components/inputs.jsx";
 import { Advanced } from "../components/Advanced.jsx";
 import { Actions } from "../components/Actions.jsx";
-import { FIT_OPTIONS, FIT_TOLERANCE, fitPatch } from "./modes.jsx";
+import { FIT_OPTIONS, PHOTO_FIT_TOLERANCE, fitPatch } from "./modes.jsx";
 
 export function PhotoPanel({ hidden, values: v, onChange, actions }) {
   const set = (key) => (value, opts) => onChange({ [key]: value }, opts);
@@ -57,7 +57,7 @@ export function PhotoPanel({ hidden, values: v, onChange, actions }) {
         label="Contorno"
         value={v.fit}
         options={FIT_OPTIONS}
-        onChange={(fit, opts) => onChange(fitPatch(fit), opts)}
+        onChange={(fit, opts) => onChange(fitPatch(fit, PHOTO_FIT_TOLERANCE), opts)}
         hint="El polígono junta en un tramo recto los escalones que no dibujan nada: el mismo dibujo con bastante menos SVG. Las curvas no comprimen —salen algo más grandes—, pero el contorno sigue siendo liso por mucho que se amplíe."
       />
 
@@ -68,9 +68,17 @@ export function PhotoPanel({ hidden, values: v, onChange, actions }) {
         min="0.25"
         max="3"
         step="0.05"
-        hidden={!(v.fit in FIT_TOLERANCE)}
-        hint="Cuánto puede apartarse la línea del contorno original. Por debajo de 0.71 no se endereza ni una diagonal; subirla comprime más y va redondeando las esquinas pequeñas."
+        hidden={!(v.fit in PHOTO_FIT_TOLERANCE)}
+        hint="Cuánto puede apartarse la línea del contorno original. A 0.71 una escalera de 45º colapsa en su diagonal, y con ella el borde de cualquier curva pequeña —una lente de gafas sale octogonal—, por eso arranca justo por debajo. En una imagen grande, donde los rasgos miden cientos de píxeles, subirla a 0.75 comprime bastante y no se pierde nada."
         onChange={set("fitTolerance")}
+      />
+
+      <Toggle
+        label="Borde subpíxel"
+        note="fuera de la retícula"
+        checked={v.subpixel}
+        onChange={set("subpixel")}
+        hint="El contorno sale de recorrer grietas entre píxeles, así que sus vértices caen en la retícula entera: una lente de gafas de dieciséis píxeles no puede ser redonda. El color de los píxeles del borde dice por dónde corta de verdad, y con eso se recolocan. Cuesta bytes —fuera de la retícula un tramo recto necesita dos números con decimales en vez de uno— y lo que compra es sitio, así que en una imagen grande, donde los rasgos ya miden cientos de píxeles, no hay nada que ganar."
       />
 
       <Toggle

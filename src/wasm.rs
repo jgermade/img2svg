@@ -226,6 +226,8 @@ export interface PhotoOptions extends FitOptions {
     tolerance?: number;
     /** Pasadas que regularizan la paleta mirando el vecindario; 0 la apaga. */
     smoothing?: number;
+    /** Colocar los vértices donde la imagen dice que está el borde, no en la retícula. */
+    subpixel?: boolean;
     /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
     alphaThreshold?: number;
     /** Área mínima, en píxeles, para que una región sobreviva. */
@@ -270,6 +272,7 @@ fn read_cluster_config(options: &JsValue) -> Config {
             .clamp(1, 8),
         tolerance: o.number("tolerance").unwrap_or(default.tolerance),
         smoothing: o.count("smoothing").unwrap_or(default.smoothing),
+        subpixel: o.flag("subpixel").unwrap_or(default.subpixel),
         alpha_threshold: o.byte("alphaThreshold").unwrap_or(default.alpha_threshold),
         filter_speckle: o.count("filterSpeckle").unwrap_or(default.filter_speckle),
         min_thickness: o.number("minThickness").unwrap_or(default.min_thickness),

@@ -24,9 +24,25 @@ fn traced(rows: &[&str]) -> Vec<Vec<Point>> {
     trace::trace(&bits, w, h)
 }
 
+/// `simplify` trabaja en reales desde que los contornos pueden salirse de la
+/// retícula ([`img2svg::subpixel`]); el trazado sigue dando enteros, así que aquí
+/// se convierten para llamarla y se vuelve a enteros para poder afirmar sobre
+/// ellos. Los valores son exactos en `f64`, así que la ida y vuelta no pierde
+/// nada.
+fn simplified(points: &[Point]) -> Vec<Point> {
+    let real: Vec<(f64, f64)> = points.iter().map(|&(x, y)| (x.into(), y.into())).collect();
+    simplify(&real)
+        .into_iter()
+        .map(|(x, y)| (x as i32, y as i32))
+        .collect()
+}
+
 /// Puntos de cada bucle, densos y tras simplificar.
 fn sizes(loops: &[Vec<Point>]) -> Vec<(usize, usize)> {
-    let mut out: Vec<(usize, usize)> = loops.iter().map(|l| (l.len(), simplify(l).len())).collect();
+    let mut out: Vec<(usize, usize)> = loops
+        .iter()
+        .map(|l| (l.len(), simplified(l).len()))
+        .collect();
     out.sort();
     out
 }
@@ -37,7 +53,7 @@ fn un_pixel_da_un_cuadrado() {
     assert_eq!(loops.len(), 1);
     // Cuatro lados de una unidad: no hay nada que colapsar.
     assert_eq!(sizes(&loops), vec![(4, 4)]);
-    let mut points = simplify(&loops[0]);
+    let mut points = simplified(&loops[0]);
     points.sort();
     assert_eq!(points, vec![(2, 2), (2, 3), (3, 2), (3, 3)]);
 }
@@ -81,6 +97,6 @@ fn mascara_vacia_no_da_contornos() {
 #[test]
 fn simplificar_dos_veces_no_cambia_nada() {
     let loops = traced(&["##.", "##.", "###"]);
-    let once = simplify(&loops[0]);
-    assert_eq!(simplify(&once), once);
+    let once = simplified(&loops[0]);
+    assert_eq!(simplified(&once), once);
 }

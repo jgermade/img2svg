@@ -6,7 +6,17 @@
 // Desviación de partida de cada ajustador que la lee. La de curvas es otra a
 // propósito: el contorno del que se parte es una escalera, y por debajo de 1 px
 // la curva se dedica a perseguir los peldaños en vez de la forma.
+//
+// También sirve de lista de qué ajustadores tienen desviación, que es lo que
+// mira cada panel para enseñar o esconder el deslizador.
 export const FIT_TOLERANCE = { polygon: 0.75, spline: 1.5 };
+
+// Foto endereza sobre la retícula de la **imagen**, donde un rasgo pequeño mide
+// pocos píxeles; pixelart lo hace sobre la del **dibujo**, donde mide los que el
+// autor quiso. Por eso el polígono arranca más abajo aquí: pasado raíz(2)/2 una
+// escalera de 45 grados colapsa en su diagonal, y el borde de una lente de gafas
+// es una sucesión de escaleras cortas de 45 grados, así que colapsa con ella.
+export const PHOTO_FIT_TOLERANCE = { ...FIT_TOLERANCE, polygon: 0.5 };
 
 export const FIT_OPTIONS = [
   { value: "pixel", label: "Escalera de píxel" },
@@ -22,9 +32,10 @@ function fitOptions({ fit, fitTolerance }) {
 
 // Al cambiar de ajustador se vuelve a su desviación: son dos suelos distintos, y
 // arrastrar la del polígono al spline es justo el valor con el que el spline
-// sale mal. Lo usan los dos paneles, así que la regla vive una sola vez.
-export function fitPatch(fit) {
-  const preset = FIT_TOLERANCE[fit];
+// sale mal. Lo usan los dos paneles, así que la regla vive una sola vez; lo que
+// cambia entre ellos es la tabla, que cada uno pasa.
+export function fitPatch(fit, presets = FIT_TOLERANCE) {
+  const preset = presets[fit];
   return preset === undefined ? { fit } : { fit, fitTolerance: preset };
 }
 
@@ -101,6 +112,7 @@ export const MODES = {
     defaults: {
       tolerance: 0.045,
       smoothing: 2,
+      subpixel: true,
       // En tanto por ciento, que es como lo enseña el deslizador; la opción del
       // wasm va en tanto por uno.
       minColorShare: 0.2,
@@ -109,7 +121,10 @@ export const MODES = {
       // —sólo la de la retícula—, y enderezarla quita entre un 23% y un 32% del
       // fichero sin que se note en el dibujo.
       fit: "polygon",
-      fitTolerance: 0.75,
+      // Por debajo de raíz(2)/2, que es donde una escalera de 45 grados colapsa
+      // en su diagonal y, de paso, una lente de gafas en un octógono: sobre la
+      // retícula las dos son localmente lo mismo.
+      fitTolerance: 0.5,
       removeBackground: false,
       filterSpeckle: 4,
       minThickness: 1,
@@ -124,6 +139,7 @@ export const MODES = {
       const opts = {
         tolerance: v.tolerance,
         smoothing: v.smoothing,
+        subpixel: v.subpixel,
         minColorShare: v.minColorShare / 100,
         gradientStep: v.gradientStep,
         filterSpeckle: v.filterSpeckle,

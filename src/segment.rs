@@ -86,6 +86,9 @@ pub fn from_pixel_map(map: &PixelMap, grouping: Grouping) -> Regions {
                     points.push(points[0]);
                     edges.push(HalfEdge {
                         points,
+                        // La rejilla no tiene borde subpíxel que buscar: sus
+                        // píxeles son los del dibujo, y la escalera es el dibujo.
+                        offsets: Vec::new(),
                         left: id,
                         // La rejilla traza cada región por su cuenta, así que no
                         // hay tramos compartidos que anotar.

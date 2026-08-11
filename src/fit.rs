@@ -39,8 +39,7 @@
 
 mod spline;
 
-use crate::region::{self, Chainable, Regions, Ring};
-use crate::trace::Point;
+use crate::region::{self, Chainable, HalfEdge, Regions, Ring};
 
 /// Un punto del contorno ya ajustado, en reales.
 ///
@@ -69,9 +68,9 @@ pub struct Vertex {
 
 impl Vertex {
     /// Un vértice de esquina, sin curva a ningún lado.
-    fn corner(p: Point) -> Self {
+    fn corner(p: Pt) -> Self {
         Vertex {
-            p: (p.0 as f64, p.1 as f64),
+            p,
             cin: None,
             cout: None,
         }
@@ -211,7 +210,7 @@ impl Fitted {
             regions
                 .edges
                 .iter()
-                .map(|edge| chain_fit(&edge.points, fit))
+                .map(|edge| chain_fit(&placed(edge, fit), fit))
                 .collect(),
         )
     }
@@ -223,9 +222,27 @@ impl Fitted {
     }
 }
 
+/// Los puntos de un tramo tal como los tiene que ver el ajustador.
+///
+/// El ajuste `pixel` es, por definición, la escalera literal de la retícula, así
+/// que ignora el desplazamiento subpíxel: pedirle que escriba `h`/`v` entre
+/// puntos que ya no están alineados sería pedirle otra cosa. Los otros dos sí lo
+/// quieren, y lo quieren **antes** de simplificar: simplificar sobre la retícula
+/// y desplazar después daría un octógono desplazado.
+fn placed(edge: &HalfEdge, fit: Fit) -> Vec<Pt> {
+    match fit {
+        Fit::Pixel => edge
+            .points
+            .iter()
+            .map(|&(x, y)| (x.into(), y.into()))
+            .collect(),
+        _ => edge.placed(),
+    }
+}
+
 /// Ajusta un tramo. Los dos extremos se quedan donde están: son los nodos en
 /// los que se encuentran las cadenas vecinas, y moverlos las abriría.
-fn chain_fit(points: &[Point], fit: Fit) -> Vec<Vertex> {
+fn chain_fit(points: &[Pt], fit: Fit) -> Vec<Vertex> {
     // Un tramo cerrado repite el primer punto al final; esa repetición es su
     // marca, y hay que devolverla puesta.
     if points.len() > 1 && points[0] == points[points.len() - 1] {
@@ -243,7 +260,7 @@ fn chain_fit(points: &[Point], fit: Fit) -> Vec<Vertex> {
 }
 
 /// Ajusta una cadena cerrada, ya sin el punto repetido del final.
-fn closed_fit(points: &[Point], fit: Fit) -> Vec<Vertex> {
+fn closed_fit(points: &[Pt], fit: Fit) -> Vec<Vertex> {
     match fit {
         Fit::Pixel => corners(simplify(points)),
         Fit::Polygon { tolerance } => corners(rdp_closed(&simplify(points), tolerance)),
@@ -253,7 +270,7 @@ fn closed_fit(points: &[Point], fit: Fit) -> Vec<Vertex> {
 
 /// Vértices de esquina a partir de una polilínea: lo que devuelven los dos
 /// ajustadores que sólo eligen puntos y no inventan ninguno.
-fn corners(points: Vec<Point>) -> Vec<Vertex> {
+fn corners(points: Vec<Pt>) -> Vec<Vertex> {
     points.into_iter().map(Vertex::corner).collect()
 }
 
@@ -264,19 +281,13 @@ fn corners(points: Vec<Point>) -> Vec<Vertex> {
 /// polilínea densa —necesitan los puntos intermedios para estimar tangentes y
 /// detectar esquinas—, y porque quitar un punto colineal no cambia la curva:
 /// pasa por donde pasaba.
-pub fn simplify(points: &[Point]) -> Vec<Point> {
+pub fn simplify(points: &[Pt]) -> Vec<Pt> {
     let n = points.len();
     if n == 0 {
         return Vec::new();
     }
     (0..n)
-        .filter(|&i| {
-            turns(
-                real(points[(i + n - 1) % n]),
-                real(points[i]),
-                real(points[(i + 1) % n]),
-            )
-        })
+        .filter(|&i| turns(points[(i + n - 1) % n], points[i], points[(i + 1) % n]))
         .map(|i| points[i])
         .collect()
 }
@@ -308,12 +319,8 @@ fn drop_collinear(v: &[Vertex]) -> Vec<Vertex> {
         .collect()
 }
 
-fn real(p: Point) -> Pt {
-    (p.0 as f64, p.1 as f64)
-}
-
 /// Lo mismo sobre una polilínea abierta, conservando los dos extremos.
-fn simplify_open(points: &[Point]) -> Vec<Point> {
+fn simplify_open(points: &[Pt]) -> Vec<Pt> {
     let n = points.len();
     if n < 3 {
         return points.to_vec();
@@ -322,7 +329,7 @@ fn simplify_open(points: &[Point]) -> Vec<Point> {
     out.push(points[0]);
     out.extend(
         (1..n - 1)
-            .filter(|&i| turns(real(points[i - 1]), real(points[i]), real(points[i + 1])))
+            .filter(|&i| turns(points[i - 1], points[i], points[i + 1]))
             .map(|i| points[i]),
     );
     out.push(points[n - 1]);
@@ -396,10 +403,9 @@ pub(crate) fn rdp_keep(points: &[Pt], tolerance: f64) -> Vec<usize> {
     (0..n).filter(|&i| keep[i]).collect()
 }
 
-/// Lo mismo sobre puntos de la retícula, que es como lo quiere el polígono.
-fn rdp(points: &[Point], tolerance: f64) -> Vec<Point> {
-    let real: Vec<Pt> = points.iter().map(|&p| self::real(p)).collect();
-    rdp_keep(&real, tolerance)
+/// Los puntos que RDP conserva, ya como puntos.
+fn rdp(points: &[Pt], tolerance: f64) -> Vec<Pt> {
+    rdp_keep(points, tolerance)
         .into_iter()
         .map(|i| points[i])
         .collect()
@@ -412,18 +418,20 @@ fn rdp(points: &[Point], tolerance: f64) -> Vec<Point> {
 /// primero y el más lejano a él, que es aproximadamente el diámetro del anillo:
 /// las dos mitades salen parecidas y ninguno de los dos puntos cae en medio de
 /// una recta larga, que es donde más se notaría clavarlo.
-fn rdp_closed(points: &[Point], tolerance: f64) -> Vec<Point> {
+fn rdp_closed(points: &[Pt], tolerance: f64) -> Vec<Pt> {
     let n = points.len();
     if n < 3 {
         return points.to_vec();
     }
-    let far = (1..n).max_by_key(|&i| dist2(points[0], points[i])).unwrap();
+    let far = (1..n)
+        .max_by(|&a, &b| dist2(points[0], points[a]).total_cmp(&dist2(points[0], points[b])))
+        .expect("n >= 3");
 
     let mut out = rdp(&points[..=far], tolerance);
     // El punto de corte lo vuelve a traer la segunda mitad.
     out.pop();
 
-    let mut back: Vec<Point> = points[far..].to_vec();
+    let mut back: Vec<Pt> = points[far..].to_vec();
     back.push(points[0]);
     let mut back = rdp(&back, tolerance);
     // Y el cierre del anillo es implícito.
@@ -454,8 +462,8 @@ fn deviation2(p: Pt, a: Pt, b: Pt) -> f64 {
 /// Distancia al cuadrado entre dos puntos de la retícula. En enteros porque
 /// sólo la usa `rdp_closed` para elegir el punto más lejano, y ahí lo que hace
 /// falta es un orden exacto y no una medida.
-fn dist2(a: Point, b: Point) -> i64 {
-    let d = ((b.0 - a.0) as i64, (b.1 - a.1) as i64);
+fn dist2(a: Pt, b: Pt) -> f64 {
+    let d = (b.0 - a.0, b.1 - a.1);
     d.0 * d.0 + d.1 * d.1
 }
 

@@ -25,7 +25,6 @@
 //! de modo que la curva se va por donde llegó.
 
 use super::{rdp_keep, Pt, Vertex};
-use crate::trace::Point;
 
 /// Ventana, en puntos del contorno denso, con la que se mide un giro.
 ///
@@ -49,24 +48,24 @@ const CORNER_COS: f64 = 0.5;
 const REPARAM: usize = 2;
 
 /// Ajusta una cadena abierta. Los dos extremos son nodos: se clavan.
-pub fn open(points: &[Point], tolerance: f64) -> Vec<Vertex> {
-    let pts = real(points);
+pub fn open(points: &[Pt], tolerance: f64) -> Vec<Vertex> {
+    let pts = points;
     if pts.len() < 3 {
         return pts.iter().map(|&p| plain(p)).collect();
     }
     let mut cuts = vec![0];
-    cuts.extend(inner_corners(&pts, false));
+    cuts.extend(inner_corners(pts, false));
     cuts.push(pts.len() - 1);
-    assemble(&pts, &cuts, None, tolerance)
+    assemble(pts, &cuts, None, tolerance)
 }
 
 /// Ajusta una cadena cerrada, ya sin el punto repetido del final.
-pub fn closed(points: &[Point], tolerance: f64) -> Vec<Vertex> {
-    let pts = real(points);
+pub fn closed(points: &[Pt], tolerance: f64) -> Vec<Vertex> {
+    let pts = points;
     if pts.len() < 4 {
         return pts.iter().map(|&p| plain(p)).collect();
     }
-    let corners = inner_corners(&pts, true);
+    let corners = inner_corners(pts, true);
 
     // Sin esquinas, el contorno es liso entero y la costura cae donde cayó al
     // trazarlo. Se deja ahí y se le estima la tangente dando la vuelta, que es
@@ -79,7 +78,7 @@ pub fn closed(points: &[Point], tolerance: f64) -> Vec<Vertex> {
     // con su período de verdad. Sobre el rotado, que repite el primer punto al
     // final para poder recorrerlo de una pasada, el módulo daría un paso de
     // menos: n+1 posiciones para un ciclo de n.
-    let seam = corners.is_empty().then(|| across(&pts, start));
+    let seam = corners.is_empty().then(|| across(pts, start));
 
     let rotated: Vec<Pt> = (0..=n).map(|i| pts[(start + i) % n]).collect();
     let mut cuts = vec![0];
@@ -459,10 +458,6 @@ fn straight(pts: &[Pt], tolerance: f64) -> bool {
 }
 
 /* ------------------------------------------------------------ vectores --- */
-
-fn real(points: &[Point]) -> Vec<Pt> {
-    points.iter().map(|p| (p.0 as f64, p.1 as f64)).collect()
-}
 
 fn plain(p: Pt) -> Vertex {
     Vertex {

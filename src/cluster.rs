@@ -115,6 +115,12 @@ pub struct ClusterOptions {
     /// Distancia máxima en Oklab entre un color y su representante en la paleta.
     /// Ver [`Oklab::distance`] para la escala: `1.0` es de negro a blanco.
     pub tolerance: f64,
+    /// Colocar cada vértice del contorno donde la imagen dice que está el borde,
+    /// en vez de en la retícula entera. Ver [`crate::subpixel`].
+    ///
+    /// Sólo lo leen los ajustes que pueden dibujar fuera de la retícula: `pixel`
+    /// es la escalera literal por definición y lo ignora.
+    pub subpixel: bool,
     /// Pasadas de regularización espacial sobre la asignación de paleta. `0` deja
     /// cada píxel donde lo puso la paleta. Ver [`crate::smooth`].
     ///
@@ -194,6 +200,7 @@ impl Default for ClusterOptions {
         ClusterOptions {
             color_precision: 5,
             tolerance: 0.045,
+            subpixel: true,
             smoothing: 2,
             alpha_threshold: 128,
             filter_speckle: 4,

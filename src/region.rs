@@ -35,9 +35,37 @@ pub struct HalfEdge {
     /// mismo, que es justo lo que un ajustador de curvas necesita saber para
     /// tratarlo como periódico en vez de dejarle dos puntas sueltas.
     pub points: Vec<Point>,
+    /// Desplazamiento subpíxel de cada punto, paralelo a `points`, o **vacío** si
+    /// esta segmentación no lo calcula. Ver [`crate::subpixel`].
+    ///
+    /// Va aquí y no dentro de `points` porque la retícula sigue siendo la verdad
+    /// de la topología: quién toca a quién, qué anillo encierra a cuál y en qué
+    /// vecina se funde una mota se deciden sobre enteros y no deben depender de
+    /// esto. El desplazamiento es sólo para dibujar.
+    pub offsets: Vec<(f32, f32)>,
     pub left: RegionId,
     /// La región del otro lado, o `None` si al otro lado está el exterior.
     pub right: Option<RegionId>,
+}
+
+impl HalfEdge {
+    /// Los puntos ya desplazados. Sin desplazamientos son los de la retícula.
+    pub fn placed(&self) -> Vec<crate::fit::Pt> {
+        if self.offsets.is_empty() {
+            return self
+                .points
+                .iter()
+                .map(|&(x, y)| (x.into(), y.into()))
+                .collect();
+        }
+        self.points
+            .iter()
+            .zip(&self.offsets)
+            .map(|(&(x, y), &(dx, dy))| {
+                (f64::from(x) + f64::from(dx), f64::from(y) + f64::from(dy))
+            })
+            .collect()
+    }
 }
 
 /// Un anillo cerrado, como secuencia de tramos. El `bool` marca que el tramo se

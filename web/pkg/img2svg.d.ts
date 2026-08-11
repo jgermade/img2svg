@@ -23,6 +23,8 @@ export interface PhotoOptions extends FitOptions {
     tolerance?: number;
     /** Pasadas que regularizan la paleta mirando el vecindario; 0 la apaga. */
     smoothing?: number;
+    /** Colocar los vértices donde la imagen dice que está el borde, no en la retícula. */
+    subpixel?: boolean;
     /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
     alphaThreshold?: number;
     /** Área mínima, en píxeles, para que una región sobreviva. */
