@@ -103,7 +103,14 @@ fn convert_con(margin: usize, options: ClusterOptions, fit: Fit) -> Conversion {
 
 fn regions(out: &Conversion) -> usize {
     match out.detail {
-        Detail::Cluster { regions } => regions,
+        Detail::Cluster { regions, .. } => regions,
+        _ => panic!("una conversión de foto debe traer detalle de clustering"),
+    }
+}
+
+fn ramps(out: &Conversion) -> usize {
+    match out.detail {
+        Detail::Cluster { ramps, .. } => ramps,
         _ => panic!("una conversión de foto debe traer detalle de clustering"),
     }
 }
@@ -273,14 +280,25 @@ fn el_poligono_dibuja_lo_mismo_con_menos_datos() {
 /// El ajuste `pixel` no lo lee —es la escalera literal por definición—, y eso
 /// también se comprueba aquí: es lo que hace que las instantáneas de rejilla
 /// sigan valiendo.
+///
+/// Con los degradados **apagados**, y no por comodidad: en este dibujo las únicas
+/// fronteras con mezcla de color son las de las bandas de la rampa —los bloques
+/// planos tienen los dos lados puros y ahí el desplazamiento sale exactamente
+/// cero—, y ésas son justo las que se lleva el degradado al fundirlas. Con
+/// degradados los dos documentos salen idénticos byte a byte, que es cierto y no
+/// es lo que este test quiere decir.
 #[test]
 fn el_subpixel_cuesta_bytes_y_compra_sitio() {
-    let con = convert_con(0, ClusterOptions::default(), Fit::polygon());
+    let sin_degradados = ClusterOptions {
+        ramps: false,
+        ..ClusterOptions::default()
+    };
+    let con = convert_con(0, sin_degradados.clone(), Fit::polygon());
     let sin = convert_con(
         0,
         ClusterOptions {
             subpixel: false,
-            ..ClusterOptions::default()
+            ..sin_degradados.clone()
         },
         Fit::polygon(),
     );
@@ -295,12 +313,12 @@ fn el_subpixel_cuesta_bytes_y_compra_sitio() {
 
     // Y con el ajuste de escalera los dos son idénticos byte a byte, porque ése
     // no mira el desplazamiento.
-    let escalera_con = convert(0, ClusterOptions::default());
+    let escalera_con = convert(0, sin_degradados.clone());
     let escalera_sin = convert(
         0,
         ClusterOptions {
             subpixel: false,
-            ..ClusterOptions::default()
+            ..sin_degradados
         },
     );
     assert_eq!(
@@ -373,6 +391,76 @@ fn las_curvas_se_quedan_donde_estan() {
         &out,
         &format!("dos discos, fit = spline (1.5), {curvas} curvas"),
     );
+}
+
+/// La rampa vertical sale como **un** degradado y no como una pila de bandas, y
+/// los dos bloques planos no entran en él.
+///
+/// Es lo que este dibujo tenía preparado desde el principio: una rampa continua
+/// que la paleta parte en escalones, y encima dos bloques de tonos muy distintos
+/// que no son ninguna rampa. Que el degradado se lleve lo primero y no lo segundo
+/// es el criterio entero.
+#[test]
+fn la_rampa_sale_de_una_pieza() {
+    let plano = convert(
+        0,
+        ClusterOptions {
+            ramps: false,
+            ..ClusterOptions::default()
+        },
+    );
+    let out = convert(0, ClusterOptions::default());
+
+    assert_eq!(ramps(&out), 1, "una rampa, un degradado");
+    assert_eq!(ramps(&plano), 0, "y sin la opción, ninguno");
+    assert!(
+        regions(&out) < regions(&plano),
+        "las bandas dejan de ser regiones: {} contra {}",
+        regions(&out),
+        regions(&plano)
+    );
+    assert!(
+        out.svg.contains("<linearGradient") && out.svg.contains("url(#r0)"),
+        "el degradado tiene que estar definido y usado"
+    );
+    assert!(
+        out.svg.contains(ROJO) && out.svg.contains(VERDE),
+        "y los bloques planos siguen siendo planos, con su color"
+    );
+    assert_eq!(
+        out.colors, plano.colors,
+        "la paleta es la misma: esto no funde colores, funde figuras"
+    );
+}
+
+/// Un borde duro no se ablanda. Dos franjas de colores lejanos apiladas cumplen
+/// la parte geométrica de ser una rampa —el color va con la altura— y aun así no
+/// pueden salir como degradado, porque el escalón entre ellas es enorme.
+#[test]
+fn una_bandera_no_es_un_degradado() {
+    let (w, h) = (48usize, 48usize);
+    let franjas = [
+        [220u8, 30, 30, 255],
+        [240, 240, 240, 255],
+        [30, 60, 200, 255],
+        [20, 20, 20, 255],
+    ];
+    let mut buf = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for _ in 0..w {
+            buf.extend_from_slice(&franjas[y * franjas.len() / h]);
+        }
+    }
+    let out = img2svg::convert_rgba(
+        w as u32,
+        h as u32,
+        &buf,
+        &Config::cluster(ClusterOptions::default()),
+    )
+    .expect("la conversión no debe fallar");
+
+    assert_eq!(ramps(&out), 0, "cuatro franjas planas no son una rampa");
+    assert!(!out.svg.contains("<linearGradient"));
 }
 
 /// Sin retirarlo, el mismo dibujo conserva el margen entero: fija el contraste

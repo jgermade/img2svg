@@ -25,6 +25,8 @@ export interface PhotoOptions extends FitOptions {
     smoothing?: number;
     /** Colocar los vértices donde la imagen dice que está el borde, no en la retícula. */
     subpixel?: boolean;
+    /** Fundir en un `<linearGradient>` los grupos de bandas que son una rampa. */
+    ramps?: boolean;
     /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
     alphaThreshold?: number;
     /** Área mínima, en píxeles, para que una región sobreviva. */
@@ -161,6 +163,11 @@ export class PhotoConversion {
     readonly colors: number;
     readonly paths: number;
     /**
+     * Degradados emitidos. Cada uno sustituye a un grupo de bandas, así que
+     * esta cifra sólo sube cuando `regions` baja.
+     */
+    readonly ramps: number;
+    /**
      * Regiones conexas emitidas. Es la cifra que se mueve al tocar el filtrado
      * de motas, y la que dice si el SVG se puede abrir en un editor.
      */
@@ -189,6 +196,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_conversion_free: (a: number, b: number) => void;
+    readonly __wbg_photoconversion_free: (a: number, b: number) => void;
     readonly conversion_background: (a: number) => [number, number];
     readonly conversion_cellHeight: (a: number) => number;
     readonly conversion_cellWidth: (a: number) => number;
@@ -204,15 +212,15 @@ export interface InitOutput {
     readonly conversion_svg: (a: number) => [number, number];
     readonly convertPhoto: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
     readonly convertRgba: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
+    readonly photoconversion_background: (a: number) => [number, number];
+    readonly photoconversion_ramps: (a: number) => number;
     readonly photoconversion_regions: (a: number) => number;
+    readonly photoconversion_svg: (a: number) => [number, number];
     readonly photoconversion_canvasHeight: (a: number) => number;
     readonly photoconversion_canvasWidth: (a: number) => number;
     readonly photoconversion_colors: (a: number) => number;
     readonly photoconversion_paths: (a: number) => number;
     readonly photoconversion_subpaths: (a: number) => number;
-    readonly __wbg_photoconversion_free: (a: number, b: number) => void;
-    readonly photoconversion_background: (a: number) => [number, number];
-    readonly photoconversion_svg: (a: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

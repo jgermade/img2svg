@@ -82,6 +82,14 @@ export function PhotoPanel({ hidden, values: v, onChange, actions }) {
       />
 
       <Toggle
+        label="Degradados"
+        note="bandas fundidas en una figura"
+        checked={v.ramps}
+        onChange={set("ramps")}
+        hint="Una rampa suave no cabe en la paleta —una región tiene un color y nada más—, así que sale a bandas, y las fronteras entre ellas no dibujan nada: sólo marcan por dónde cruzó la rampa un umbral, siguiendo el ruido del original. Cuando un solo degradado lineal reproduce el color de todas, se funden en una figura con ese degradado. Un borde duro no pasa el corte y se queda duro. En un cielo con grano quita el bandeado y nueve décimas partes del fichero; en un cartel de colores planos no encuentra nada y cuesta un poco."
+      />
+
+      <Toggle
         label="Quitar el fondo"
         note="y recortar al dibujo"
         checked={v.removeBackground}

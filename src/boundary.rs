@@ -57,6 +57,9 @@ pub fn from_clustering(clustering: &Clustering) -> Regions {
         height: clustering.height,
         colors: clustering.colors,
         regions,
+        // Los pone [`crate::ramp`] después, si se piden: aquí sólo se sabe de
+        // grietas, y qué bandas son una rampa es una pregunta para los colores.
+        ramps: Vec::new(),
         edges,
     }
 }
@@ -294,7 +297,14 @@ fn assemble(clustering: &Clustering, edges: &[HalfEdge]) -> Vec<Region> {
 }
 
 /// Reparte los tramos de una cara en anillos cerrados.
-fn rings(edges: &[HalfEdge], uses: &[(EdgeId, bool)]) -> Vec<Ring> {
+///
+/// «Cara» y no «región» a propósito: lo único que se le pide a `uses` es que sean
+/// los tramos de una figura, cada uno orientado con la figura a su izquierda. Con
+/// eso vale igual para el contorno de una región que para el de la **unión** de
+/// varias —quitando los tramos que quedan por dentro—, que es de lo que vive
+/// [`crate::ramp`] y por lo que fundir un grupo de bandas no necesita ni un
+/// recorte de polígonos.
+pub(crate) fn rings(edges: &[HalfEdge], uses: &[(EdgeId, bool)]) -> Vec<Ring> {
     let mut by_start: HashMap<Point, Vec<usize>> = HashMap::new();
     for (i, &u) in uses.iter().enumerate() {
         by_start.entry(start_of(edges, u)).or_default().push(i);

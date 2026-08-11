@@ -39,6 +39,7 @@ const ENGINES = {
       paths: out.paths,
       subpaths: out.subpaths,
       regions: out.regions,
+      ramps: out.ramps,
       background: out.background,
     }),
   },

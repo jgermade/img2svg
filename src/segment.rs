@@ -106,6 +106,9 @@ pub fn from_pixel_map(map: &PixelMap, grouping: Grouping) -> Regions {
         height: map.height,
         colors: counts.len(),
         regions,
+        // La rejilla no busca degradados: sus colores son los que el autor puso,
+        // no una rampa continua repartida en escalones por la tolerancia.
+        ramps: Vec::new(),
         edges,
     }
 }

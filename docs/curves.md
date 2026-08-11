@@ -303,6 +303,71 @@ palette: nothing is added and every colour goes to its nearest entry. Both drop
 the "within `tolerance`" guarantee by construction, which is the point of asking
 for them.
 
+**Gradients as gradients** (`ramp.rs`). The paragraph above says a vector format
+has no cheap per-region gradient, so a ramp has to come out as steps. That is true
+per region and false per document: SVG does have `<linearGradient>`, and a group
+of bands that one linear gradient reproduces can be merged into a single shape
+painted with it. The band boundaries then disappear, and they are the raggedest
+contours in the document, since they trace where a smooth ramp happened to cross a
+quantisation threshold.
+
+The criterion is exactly what the element can express — colour as a function of
+the projection of position onto one axis — plus one condition that is not
+obvious and is doing most of the work:
+
+> A group of neighbouring regions is a ramp when one linear gradient reproduces
+> every one of their colours to within `ramp::CEILING` tolerances **and within a
+> `ramp::GAIN`-th of the colour range it spans**.
+
+Without the second half, a flat colour would already qualify: it reproduces any
+group to within the range the group spans, so a gradient that does not beat that
+by a good factor is explaining nothing. On an album cover, the six near-black
+entries that JPEG ringing leaves around a stroke all sit **inside the ceiling**,
+so any axis "explains" them, and 24 gradients came out of pure noise — two of them
+smearing a face into a diagonal that does not exist.
+
+One stop per **colour**, not per band. Per band there would be one parameter per
+data point: the gradient would hit each band's centre by construction and a speck
+is short along every axis, so the test could not fail. That is the difference
+between fitting and interpolating, and only the first can be checked. Per colour,
+a ramp can still bend through Oklab freely — which two stops could not — and the
+error still means something: within a band the gradient runs from the midpoint
+with one neighbour to the midpoint with the other, so the worst it strays from the
+flat colour is half a step. The ceiling therefore limits the step *between*
+adjacent bands, not the width of a band, and a flag of hard stripes is rejected
+while a smooth ramp passes.
+
+The error is measured against what a browser actually draws: SVG interpolates
+stops in **sRGB**, so the model is the sRGB interpolation and only the distance is
+taken in Oklab. Checking a curve that is straight in Oklab would be checking a
+gradient nobody is going to render.
+
+Merging costs nothing in machinery. Every half-edge already knows the region on
+each side, so the union's outline is the edges with exactly one side inside the
+group, and `boundary::rings` — which already turns a set of oriented edge uses
+into closed rings — does the rest. No polygon clipping anywhere. This is the third
+thing the half-edge IR has paid for.
+
+Where it pays, measured on a 900×600 sky with photographic grain:
+
+| | colours | paths | anchors | SVG |
+| --- | --- | --- | --- | --- |
+| bands | 9 | 121 | 13,799 | 70.6 KB |
+| one gradient | 9 | **3** | **1,854** | **5.9 KB** |
+
+And where it does not: on flat-colour artwork it finds almost nothing, which is
+correct, and then it costs — 17 small gradients and 2 KB on an album cover, and
+10% of the conversion time. The two images that started this work are both flat
+artwork, so on them this is roughly a wash; the case it is for had to be built to
+be measured, which is worth saying plainly.
+
+It also pulls against `min_color_share`. That option drops palette entries that
+paint little, the middle of a ramp paints little, and what survives are steps
+larger than a gradient can reproduce. Turning it off on a 5 Mpx drawing goes from
+24 gradients to 98 — and still gives a bigger document, because the finer palette
+costs more than the gradients save. Each wins in its own place and you cannot have
+both.
+
 **Background removal.** `remove_background` empties the flat background and crops
 to what is left, as the pixel-art path already did. On a label image it needs no
 flood fill: the regions *are* connected blocks of one colour, so "what comes in

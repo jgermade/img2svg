@@ -147,6 +147,8 @@ Takes the same [shared options](#shared-options). Its own:
 | `-t, --tolerance <N>` | `0.045` | Maximum Oklab distance between a colour and the region that paints it. The scale is perceptual and runs 0 to 1: black to white is `1.0`. |
 | `-c, --color-precision <N>` | `5` | Bits per channel the colour is cut to before grouping. |
 | `--smoothing <N>` | `2` | Passes that regularise the palette assignment against each pixel's neighbourhood. `0` turns it off. |
+| `--no-subpixel` | off | Keeps contour vertices on the integer lattice instead of where the image says the edge is. |
+| `--no-ramps` | off | Keeps every band of a gradient as its own flat shape instead of merging them into a `<linearGradient>`. |
 | `-a, --alpha-threshold <N>` | `128` | Minimum alpha for a pixel to count as visible. |
 | `--filter-speckle <N>` | `4` | Area in pixels up to which a region merges into a neighbour. |
 | `--min-thickness <N>` | `1` | Thickness below which a region merges into a neighbour, however large its area. |
@@ -164,7 +166,8 @@ lienzo 662x1079, 1099 regiones
 ```
 
 The region count is the number to watch when tuning the speck filters: the colour
-count barely moves and this does.
+count barely moves and this does. A `, N degradados` joins that line when any were
+found, and it only appears when there are some.
 
 ### The two knobs that surprise people
 
@@ -180,6 +183,23 @@ The default of `1` is exactly the thickness of a 2×2 block, so it removes
 **everything one pixel wide**, a genuine hairline included. That is the price of
 removing the fringes, and it is worth paying on a photo, where fringes outnumber
 real one-pixel features by orders of magnitude. On fine line art, set it to `0`.
+
+**Gradients come out as gradients, when they are gradients.** A smooth ramp does
+not fit in a palette — a region has one colour and that is all — so it arrives as
+a stack of bands whose boundaries draw nothing: they only mark where the ramp
+crossed a quantisation threshold, following the noise of the source. A group of
+bands that one linear gradient reproduces is merged into a single shape with that
+gradient. On a 900×600 sky with photographic grain that is 121 shapes and 70.6 KB
+down to 3 and 5.9 KB, with the banding gone. On flat-colour artwork it finds
+almost nothing, which is correct, and then it costs a little — about 2 KB and 10%
+of the conversion time on an album cover. A hard edge does not pass the test and
+stays hard.
+
+It pulls against `--min-color-share`, which is worth knowing: that option drops
+the palette entries that paint little, the middle of a ramp paints little, and
+what is left are steps too big for a gradient to reproduce. Turning it off on a
+5 Mpx drawing goes from 24 gradients to 98 — and still gives a *bigger* document,
+because the finer palette costs more than the gradients save.
 
 **`--gradient-step` flattens shading.** It merges tones that differ only in
 lightness, leaving hue alone, so a smooth sky comes out in wider bands instead of

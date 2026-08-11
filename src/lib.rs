@@ -29,6 +29,8 @@ pub mod cluster;
 pub mod color;
 pub mod fit;
 pub mod grid;
+#[cfg(feature = "photo")]
+pub mod ramp;
 pub mod region;
 pub mod segment;
 #[cfg(feature = "photo")]
@@ -210,6 +212,9 @@ pub enum Detail {
         /// Regiones conexas emitidas. Es el número que hay que mirar al tocar el
         /// filtrado de motas: los colores casi no se mueven y esto sí.
         regions: usize,
+        /// Degradados encontrados. Cada uno se llevó por delante un grupo de
+        /// bandas, así que no se suma a `regions`: se lo resta.
+        ramps: usize,
     },
 }
 
@@ -268,6 +273,8 @@ pub enum Stage {
     Speckle,
     /// Extraer las fronteras y armar los anillos.
     Boundaries,
+    /// Buscar degradados y fundir en uno cada grupo de bandas.
+    Ramps,
     /// Ajustar los contornos y escribir el SVG.
     Document,
 }
@@ -281,8 +288,9 @@ impl Stage {
             Stage::Smoothing => (0.39, 0.18),
             Stage::Runs => (0.57, 0.10),
             Stage::Speckle => (0.67, 0.08),
-            Stage::Boundaries => (0.75, 0.19),
-            Stage::Document => (0.94, 0.06),
+            Stage::Boundaries => (0.75, 0.15),
+            Stage::Ramps => (0.90, 0.05),
+            Stage::Document => (0.95, 0.05),
         }
     }
 }
@@ -537,6 +545,12 @@ fn convert_cluster(
     if options.subpixel {
         subpixel::place(&mut regions, &clustering, img);
     }
+    if options.ramps {
+        // Con los tramos ya colocados, porque fundir un grupo sólo elige cuáles se
+        // dibujan y no toca ninguno.
+        progress.stage(Stage::Ramps);
+        ramp::merge(&mut regions, &clustering.labels, options.tolerance);
+    }
     progress.stage(Stage::Document);
 
     // Una unidad del `viewBox` es un píxel de la imagen, así que el SVG sale a
@@ -559,6 +573,7 @@ fn convert_cluster(
         background: clustering.background,
         detail: Detail::Cluster {
             regions: regions.regions.len(),
+            ramps: regions.ramps.len(),
         },
     }
 }

@@ -61,6 +61,7 @@ const CAMPOS = {
       "paths",
       "subpaths",
       "regions",
+      "ramps",
     ],
     opcionales: ["background"],
   },

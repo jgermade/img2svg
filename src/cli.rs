@@ -236,6 +236,20 @@ struct Photo {
     #[arg(long)]
     no_subpixel: bool,
 
+    /// No fundir en un degradado los grupos de bandas que son una rampa.
+    ///
+    /// La paleta reparte una rampa continua en escalones, y las fronteras entre
+    /// esas bandas no dibujan nada: sólo marcan por dónde cruzó la rampa un
+    /// umbral de cuantización, siguiendo el ruido del original. Un grupo de
+    /// bandas que un solo <linearGradient> sabe reproducir se funde en una figura
+    /// con ese degradado, lo que baja a la vez colores, figuras y anclas.
+    ///
+    /// Se aceptan grupos cuyo degradado acierta el color de cada banda; un borde
+    /// duro, donde el salto entre bandas es grande, no pasa el corte y se queda
+    /// duro. Con esto puesto todo sale a bandas planas, como antes.
+    #[arg(long)]
+    no_ramps: bool,
+
     /// Pasadas de regularización de la paleta mirando el vecindario (0 la apaga).
     ///
     /// La paleta asigna cada píxel por su cuenta, así que en cuanto el ruido del
@@ -318,6 +332,7 @@ impl Photo {
             color_precision: self.color_precision,
             tolerance: self.tolerance,
             subpixel: !self.no_subpixel,
+            ramps: !self.no_ramps,
             smoothing: self.smoothing,
             alpha_threshold: self.alpha_threshold,
             filter_speckle: self.filter_speckle,
@@ -394,10 +409,17 @@ fn run_photo(args: &Photo) -> Result<(), String> {
     report_background(&out);
     // El número de regiones es lo que se mueve al tocar el filtrado de motas, y
     // no se deduce de los paths: un color con varias regiones va en un `<g>`.
-    if let img2svg::Detail::Cluster { regions } = out.detail {
+    if let img2svg::Detail::Cluster { regions, ramps } = out.detail {
+        // Los degradados sólo se nombran cuando los hay: en un dibujo de colores
+        // planos no hay ninguno y la línea no tiene por qué decirlo.
+        let con_degradados = match ramps {
+            0 => String::new(),
+            1 => ", 1 degradado".to_string(),
+            n => format!(", {n} degradados"),
+        };
         eprintln!(
-            "lienzo {}x{}, {} regiones",
-            out.canvas.0, out.canvas.1, regions
+            "lienzo {}x{}, {} regiones{}",
+            out.canvas.0, out.canvas.1, regions, con_degradados
         );
     }
     report_output(&out, &path);

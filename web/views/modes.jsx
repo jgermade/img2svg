@@ -113,6 +113,7 @@ export const MODES = {
       tolerance: 0.045,
       smoothing: 2,
       subpixel: true,
+      ramps: true,
       // En tanto por ciento, que es como lo enseña el deslizador; la opción del
       // wasm va en tanto por uno.
       minColorShare: 0.2,
@@ -140,6 +141,7 @@ export const MODES = {
         tolerance: v.tolerance,
         smoothing: v.smoothing,
         subpixel: v.subpixel,
+        ramps: v.ramps,
         minColorShare: v.minColorShare / 100,
         gradientStep: v.gradientStep,
         filterSpeckle: v.filterSpeckle,
@@ -162,7 +164,10 @@ export const MODES = {
         stats:
           (out.background ? `fondo ${out.background} quitado · ` : "") +
           `lienzo ${canvas} · ${out.colors} colores · ` +
-          `${out.regions} regiones · ${out.paths} paths`,
+          `${out.regions} regiones · ${out.paths} paths` +
+          // Sólo cuando los hay: en un dibujo de colores planos no sale ninguno
+          // y la línea no tiene por qué decirlo.
+          (out.ramps ? ` · ${out.ramps} degradados` : ""),
       };
     },
   },

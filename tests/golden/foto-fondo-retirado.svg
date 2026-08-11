@@ -1,25 +1,18 @@
 <!--
   dibujo con margen de 6 px, remove_background
   lienzo      64x48
-  regiones    10
+  regiones    2
+  degradados  1
   colores     8
-  paths       10
-  subtrazados 10
+  paths       3
+  subtrazados 5
   fondo       #ffffff
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="48" viewBox="0 0 64 48" shape-rendering="crispEdges">
-  <path fill="#293a73" d="M6 14h-6v12h64v-12h-38v6h-20z"/>
-  <path fill="#4263c5" d="M36 37h-36v11h64v-11h-6v5h-22z"/>
-  <path fill="#19214a" d="M64 6h-64v8h6v-6h20v6h38z"/>
-  <path fill="#101931" d="M0 6h64v-6h-64z"/>
-  <g fill="#314a94">
-    <path d="M36 26h-36v9h36z"/>
-    <path d="M64 26h-6v9h6z"/>
-  </g>
+  <defs>
+    <linearGradient id="r0" gradientUnits="userSpaceOnUse" x1="30.977" y1="2.499" x2="30.864" y2="42.562"><stop offset="0" stop-color="#101931"/><stop offset="0.167" stop-color="#19214a"/><stop offset="0.438" stop-color="#293a73"/><stop offset="0.687" stop-color="#314a94"/><stop offset="0.824" stop-color="#3a52ad"/><stop offset="1" stop-color="#4263c5"/></linearGradient>
+  </defs>
+  <path fill="url(#r0)" fill-rule="evenodd" d="M64 0h-64v48h64zM6 8h20v12h-20zM36 26h22v16h-22z"/>
   <path fill="#299c3a" d="M58 26h-22v16h22z"/>
   <path fill="#c52929" d="M26 8h-20v12h20z"/>
-  <g fill="#3a52ad">
-    <path d="M36 35h-36v2h36z"/>
-    <path d="M64 35h-6v2h6z"/>
-  </g>
 </svg>

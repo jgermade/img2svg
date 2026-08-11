@@ -60,10 +60,10 @@ fn header(out: &Conversion, extra: &str) -> String {
             ),
         ),
         #[cfg(feature = "photo")]
-        Detail::Cluster { regions } => (
+        Detail::Cluster { regions, ramps } => (
             format!(
-                "  lienzo      {}x{}\n  regiones    {}\n",
-                out.canvas.0, out.canvas.1, regions
+                "  lienzo      {}x{}\n  regiones    {}\n  degradados  {}\n",
+                out.canvas.0, out.canvas.1, regions, ramps
             ),
             String::new(),
         ),

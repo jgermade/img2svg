@@ -54,6 +54,12 @@
 //! vale la cota estrecha tal cual está escrita arriba. `tests/cluster.rs`
 //! comprueba las dos.
 //!
+//! Fuera de aquí queda una etapa más que también gasta: [`crate::ramp`] añade
+//! hasta [`crate::ramp::CEILING`] tolerancias **encima** de lo que la región ya
+//! traía. No entra en la tabla porque no es de esta fase —la segmentación acaba
+//! con cada región de un color, y el degradado se decide al escribir el
+//! documento—, pero sí en la cuenta de quien mire un píxel del resultado.
+//!
 //! # Por qué por tramos y no por píxel
 //!
 //! La cuarta etapa va por **tramos** —secuencias horizontales de igual
@@ -128,6 +134,13 @@ pub struct ClusterOptions {
     /// una mota compacta de ruido se erosiona una corona por pasada, mientras que
     /// un detalle que sí es dibujo no se mueve por muchas que se den.
     pub smoothing: usize,
+    /// Buscar grupos de bandas que sean una rampa y fundir cada uno en una sola
+    /// figura con `<linearGradient>`. Ver [`crate::ramp`].
+    ///
+    /// Es lo único de aquí que baja las tres cifras a la vez —colores, figuras y
+    /// anclas—, porque las fronteras entre bandas de un degradado son contornos
+    /// que no dibujan nada: sólo marcan por dónde cruzó la rampa un umbral.
+    pub ramps: bool,
     /// Alfa mínimo para considerar visible un píxel.
     pub alpha_threshold: u8,
     /// Área hasta la que una región se funde con una vecina. `0` no funde nada.
@@ -202,6 +215,7 @@ impl Default for ClusterOptions {
             tolerance: 0.045,
             subpixel: true,
             smoothing: 2,
+            ramps: true,
             alpha_threshold: 128,
             filter_speckle: 4,
             min_thickness: 1.0,

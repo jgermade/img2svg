@@ -36,15 +36,64 @@ pub fn render(regions: &Regions, opts: &Options) -> Output {
     // puede ser el otro.
     let fitted = Fitted::new(regions, opts.fit);
 
+    let mut total_paths = 0;
+    let mut total_subpaths = 0;
+
+    // Los degradados van los primeros, justo encima del fondo. El orden no decide
+    // nada —las regiones se reparten el lienzo sin solaparse y las fronteras
+    // compartidas se ajustan una sola vez, así que ninguna tapa a otra—, pero la
+    // convención del documento es que lo grande quede abajo, y una figura de
+    // degradado es la unión de un montón de bandas.
+    let mut defs = String::new();
     let mut body = String::new();
+    for (i, ramp) in regions.ramps.iter().enumerate() {
+        total_paths += 1;
+        total_subpaths += ramp.rings.len();
+        let stops: String = ramp
+            .stops
+            .iter()
+            .map(|&(at, color)| {
+                format!(
+                    "<stop offset=\"{}\" stop-color=\"{}\"/>",
+                    trim_float(at),
+                    color.to_hex()
+                )
+            })
+            .collect();
+        defs.push_str(&format!(
+            "    <linearGradient id=\"r{i}\" gradientUnits=\"userSpaceOnUse\" \
+x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">{stops}</linearGradient>\n",
+            trim_float(ramp.from.0),
+            trim_float(ramp.from.1),
+            trim_float(ramp.to.0),
+            trim_float(ramp.to.1),
+        ));
+        let d: String = ramp
+            .rings
+            .iter()
+            .map(|ring| fitted.ring_data(ring))
+            .collect();
+        // Mismo criterio que en una región: el par-impar sólo hace falta si hay
+        // agujeros, y una figura de degradado los tiene en cuanto algo del dibujo
+        // cae dentro de la rampa.
+        let rule = if ramp.rings.len() > 1 {
+            " fill-rule=\"evenodd\""
+        } else {
+            ""
+        };
+        body.push_str(&format!("  <path fill=\"url(#r{i})\"{rule} d=\"{d}\"/>\n"));
+    }
+
+    let mut head = String::new();
+    if !defs.is_empty() {
+        head.push_str(&format!("  <defs>\n{defs}  </defs>\n"));
+    }
     if let Some(bg) = &opts.background {
-        body.push_str(&format!(
+        head.push_str(&format!(
             "  <rect width=\"{w}\" height=\"{h}\" fill=\"{bg}\"/>\n"
         ));
     }
-
-    let mut total_paths = 0;
-    let mut total_subpaths = 0;
+    body.insert_str(0, &head);
 
     // Las regiones llegan con las de un color seguidas, así que basta con
     // avanzar por tramos.

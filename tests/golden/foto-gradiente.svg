@@ -1,16 +1,18 @@
 <!--
   dibujo, gradient_step = 0.15
   lienzo      64x48
-  regiones    5
+  regiones    2
+  degradados  1
   colores     5
-  paths       5
+  paths       3
   subtrazados 5
   fondo       no
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="48" viewBox="0 0 64 48" shape-rendering="crispEdges">
-  <path fill="#293a73" d="M6 13h-6v19h36v-6h22v6h6v-19h-38v7h-20z"/>
-  <path fill="#4263c5" d="M36 32h-36v16h64v-16h-6v10h-22z"/>
-  <path fill="#101931" d="M0 13h6v-5h20v5h38v-13h-64z"/>
+  <defs>
+    <linearGradient id="r0" gradientUnits="userSpaceOnUse" x1="30.981" y1="5.444" x2="30.859" y2="40.333"><stop offset="0" stop-color="#101931"/><stop offset="0.474" stop-color="#293a73"/><stop offset="1" stop-color="#4263c5"/></linearGradient>
+  </defs>
+  <path fill="url(#r0)" fill-rule="evenodd" d="M64 0h-64v48h64zM6 8h20v12h-20zM36 26h22v16h-22z"/>
   <path fill="#299c3a" d="M58 26h-22v16h22z"/>
   <path fill="#c52929" d="M26 8h-20v12h20z"/>
 </svg>

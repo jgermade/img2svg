@@ -161,7 +161,17 @@ impl PhotoConversion {
     #[wasm_bindgen(getter)]
     pub fn regions(&self) -> usize {
         match self.inner.detail {
-            crate::Detail::Cluster { regions } => regions,
+            crate::Detail::Cluster { regions, .. } => regions,
+            _ => 0,
+        }
+    }
+
+    /// Degradados emitidos. Cada uno sustituye a un grupo de bandas, así que
+    /// esta cifra sólo sube cuando `regions` baja.
+    #[wasm_bindgen(getter)]
+    pub fn ramps(&self) -> usize {
+        match self.inner.detail {
+            crate::Detail::Cluster { ramps, .. } => ramps,
             _ => 0,
         }
     }
@@ -228,6 +238,8 @@ export interface PhotoOptions extends FitOptions {
     smoothing?: number;
     /** Colocar los vértices donde la imagen dice que está el borde, no en la retícula. */
     subpixel?: boolean;
+    /** Fundir en un `<linearGradient>` los grupos de bandas que son una rampa. */
+    ramps?: boolean;
     /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
     alphaThreshold?: number;
     /** Área mínima, en píxeles, para que una región sobreviva. */
@@ -273,6 +285,7 @@ fn read_cluster_config(options: &JsValue) -> Config {
         tolerance: o.number("tolerance").unwrap_or(default.tolerance),
         smoothing: o.count("smoothing").unwrap_or(default.smoothing),
         subpixel: o.flag("subpixel").unwrap_or(default.subpixel),
+        ramps: o.flag("ramps").unwrap_or(default.ramps),
         alpha_threshold: o.byte("alphaThreshold").unwrap_or(default.alpha_threshold),
         filter_speckle: o.count("filterSpeckle").unwrap_or(default.filter_speckle),
         min_thickness: o.number("minThickness").unwrap_or(default.min_thickness),

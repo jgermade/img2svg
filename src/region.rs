@@ -82,6 +82,28 @@ pub struct Region {
     pub rings: Vec<Ring>,
 }
 
+/// Un grupo de bandas fundido en una sola figura con degradado lineal.
+///
+/// No es una [`Region`] con otro relleno: **no tiene un color**, y darle uno
+/// falso para que el vector siguiera siendo homogéneo sería mentir en el tipo.
+/// Lo que comparte con una región es lo único que hace falta para dibujarla, que
+/// son sus anillos. Quien los encuentra es `crate::ramp`, que sólo existe con la
+/// segmentación por clustering; el tipo vive aquí, con el resto de lo que se
+/// dibuja, porque es a [`crate::svg`] a quien le toca saber pintarlo.
+#[derive(Clone, Debug)]
+pub struct Ramp {
+    /// Contorno de la unión de las bandas, con sus agujeros, igual que en una
+    /// región y con el mismo `fill-rule`.
+    pub rings: Vec<Ring>,
+    /// Los dos extremos del eje del degradado, en coordenadas del lienzo.
+    pub from: (f64, f64),
+    pub to: (f64, f64),
+    /// Paradas en orden, cada una con su posición en `0..1` sobre ese eje.
+    pub stops: Vec<(f64, Rgba)>,
+    /// Bandas que sustituye. No hace falta para dibujar; se informa.
+    pub bands: usize,
+}
+
 /// Lo que devuelve la segmentación.
 ///
 /// Las regiones vienen **en orden de emisión**: las del mismo color seguidas, y
@@ -97,6 +119,9 @@ pub struct Regions {
     /// región, pero sí estaba en la imagen.
     pub colors: usize,
     pub regions: Vec<Region>,
+    /// Los degradados encontrados, si se buscaron. Las regiones que cada uno se
+    /// llevó **ya no están** en `regions`.
+    pub ramps: Vec<Ramp>,
     pub edges: Vec<HalfEdge>,
 }
 
