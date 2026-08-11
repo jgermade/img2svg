@@ -76,13 +76,57 @@ merges swallows the whole sky, which ends up one flat region matching neither of
 its ends. With the palette fixed up front the error is bounded by construction
 and does not depend on where the sweep started.
 
-That bound belongs to the palette, and the stages that **merge** are the ones
-that spend it, each at a stated price: regularisation may worsen a pixel by up to
-`smooth::CEILING` × the tolerance, and only towards a colour already painted next
-to it; speck filtering has no bound at all, since a speck leaves with whatever
-neighbour it merges into. Turn all three off — `smoothing: 0`, `filter_speckle: 0`,
-`min_thickness: 0` — and the guarantee reads exactly as written above, which is
-how `tests/cluster.rs` checks it.
+That bound belongs to the palette with everything else off, and the stages that
+**merge** are the ones that spend it, each at a stated price: `min_color_share`
+up to `cluster::SNAP_CEILING` × the tolerance; regularisation up to
+`smooth::CEILING` × it or as far as the pixel already was, and only towards a
+colour already painted next to it; speck filtering with no bound at all, since a
+speck leaves with whatever neighbour it merges into. The first two compose
+without loosening — 4× stays 4× with both on — so **at the defaults no pixel is
+painted further than `SNAP_CEILING × tolerance` from its colour**. Turn all of
+them off and the narrow guarantee reads exactly as written above.
+`tests/cluster.rs` checks both.
+
+**Earning a palette entry** (`min_color_share`). Grouping walks the distinct
+colours most-frequent-first, but frequency only *orders* the seeding — it never
+gates it, so a colour occurring thirty times in the whole image founds an entry as
+readily as the background. On a JPEG album cover that meant 65 entries of which
+**42 painted under 0.2% each and 1.45% between them**: the ringing around the
+black strokes, one entry per step.
+
+Counting pixels is not enough on its own, because it cannot tell forty pixels of
+ringing scattered along the edges from a forty-pixel red mole. What separates them
+is how much error the entry *saves*: ringing sits next to a colour that already
+exists and saves almost nothing, a mole is far from everything and saves a lot. So
+an entry earns its place when `pixels × distance to the nearest entry ≥
+min_color_share × visible pixels × tolerance` — the new entry has to remove at
+least as much error as having that fraction of the image off by one tolerance.
+
+That still needs a ceiling, or it has no bound: the criterion is pixels × distance,
+so a colour with few pixels can be asked for an arbitrary distance, and on a 5 Mpx
+image a saturated 30×30 mole would lose its colour. Past `SNAP_CEILING` × the
+tolerance a colour always founds an entry however rare it is. Where to put it,
+measured in palette entries:
+
+| ceiling | cover.jpg | Sonic1.png |
+| --- | --- | --- |
+| 2× | 30 | 37 |
+| 3× | 20 | 24 |
+| **4×** | **20** | **21** |
+| none | 20 | 18 |
+
+Entries against the share, over three images with nothing in common — a JPEG
+illustration drawn in strokes, a 5 Mpx scanned airbrush, and an upscaled sprite:
+
+| image | off | 0.001 | **0.002** | 0.005 |
+| --- | --- | --- | --- | --- |
+| cover.jpg | 68 | 27 | **20** | 12 |
+| Sonic1.png | 86 | 24 | **18** | 16 |
+| sprite | 80 | 18 | **16** | 13 |
+
+All three agree on the same place, which is what makes it a default rather than a
+setting: past it the palette has entries that paint nothing, before it nothing has
+started to go missing.
 
 The labelling works on **runs** — horizontal spans of equal palette entry — not
 on pixels. A flood fill over four million pixels is millions of stack pushes with

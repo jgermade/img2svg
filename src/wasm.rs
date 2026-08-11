@@ -234,6 +234,8 @@ export interface PhotoOptions extends FitOptions {
     minThickness?: number;
     /** Escalón de un degradado: separación mínima entre entradas de la paleta. */
     gradientStep?: number;
+    /** Parte de la imagen que un color tiene que valer para tener entrada propia. */
+    minColorShare?: number;
     /** Tope de colores de la paleta. */
     maxColors?: number;
     /** Quitar el color de fondo. */
@@ -272,6 +274,7 @@ fn read_cluster_config(options: &JsValue) -> Config {
         filter_speckle: o.count("filterSpeckle").unwrap_or(default.filter_speckle),
         min_thickness: o.number("minThickness").unwrap_or(default.min_thickness),
         gradient_step: o.number("gradientStep").unwrap_or(default.gradient_step),
+        min_color_share: o.number("minColorShare").unwrap_or(default.min_color_share),
         max_colors: o.count("maxColors").unwrap_or(default.max_colors),
         // Igual que en el CLI: una paleta impuesta pide una sintaxis que la
         // página no tiene dónde poner. Queda en la biblioteca.

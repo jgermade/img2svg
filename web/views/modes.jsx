@@ -101,6 +101,9 @@ export const MODES = {
     defaults: {
       tolerance: 0.045,
       smoothing: 2,
+      // En tanto por ciento, que es como lo enseña el deslizador; la opción del
+      // wasm va en tanto por uno.
+      minColorShare: 0.2,
       gradientStep: 0,
       fit: "pixel",
       fitTolerance: 0.75,
@@ -118,6 +121,7 @@ export const MODES = {
       const opts = {
         tolerance: v.tolerance,
         smoothing: v.smoothing,
+        minColorShare: v.minColorShare / 100,
         gradientStep: v.gradientStep,
         filterSpeckle: v.filterSpeckle,
         minThickness: v.minThickness,

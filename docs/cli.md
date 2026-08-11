@@ -144,6 +144,7 @@ Takes the same [shared options](#shared-options). Its own:
 | `--filter-speckle <N>` | `4` | Area in pixels up to which a region merges into a neighbour. |
 | `--min-thickness <N>` | `1` | Thickness below which a region merges into a neighbour, however large its area. |
 | `--gradient-step <N>` | `0` | Widens the bands of a gradient by merging on lightness difference alone. |
+| `--min-color-share <N>` | `0.002` | What a colour has to be worth, as a fraction of the image, to get a palette entry of its own. `0` gives one to anybody. |
 | `--max-colors <N>` | `0` | Cap on palette entries. `0` is no cap. |
 | `-r, --remove-background` | off | Clears the flat background and crops the SVG to the artwork. |
 

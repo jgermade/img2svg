@@ -37,17 +37,22 @@
 //! ninguno de sus extremos—. Con la paleta fija de antemano el error está acotado
 //! por construcción y no depende de por dónde se haya empezado a recorrer.
 //!
-//! Esa cota es de la paleta, y las etapas que **funden** son las que la gastan,
-//! cada una con su precio dicho:
+//! Esa cota es de la paleta con todo lo demás apagado, y las etapas que **funden**
+//! son las que la gastan, cada una con su precio dicho:
 //!
 //! | etapa | qué puede empeorar el color de un píxel |
 //! | --- | --- |
-//! | [`crate::smooth`] | hasta [`crate::smooth::CEILING`] veces la tolerancia, y sólo a un color que ya se pintaba pegado a él |
+//! | `min_color_share` | hasta [`SNAP_CEILING`] veces la tolerancia |
+//! | [`crate::smooth`] | hasta [`crate::smooth::CEILING`] veces la tolerancia, o hasta donde ya estuviera; y sólo a un color que ya se pintaba pegado a él |
 //! | [`crate::speckle`] | sin cota: una mota se va con su vecina, sea del color que sea |
 //!
-//! Con las dos apagadas —`smoothing: 0`, `filter_speckle: 0`,
-//! `min_thickness: 0`— la garantía vale tal cual está escrita, y así es como la
-//! comprueba `tests/cluster.rs`.
+//! Las dos primeras componen sin aflojarse: `4x` sigue siendo la cota con las dos
+//! puestas, porque el suavizado nunca empeora un píxel más allá de donde ya
+//! estaba. Así que **con los valores por defecto ningún píxel se pinta a más de
+//! `SNAP_CEILING * tolerance` de su color**, y apagando las tres —
+//! `min_color_share: 0`, `smoothing: 0`, `filter_speckle: 0`, `min_thickness: 0`—
+//! vale la cota estrecha tal cual está escrita arriba. `tests/cluster.rs`
+//! comprueba las dos.
 //!
 //! # Por qué por tramos y no por píxel
 //!
@@ -72,6 +77,32 @@ use crate::{Progress, Stage};
 /// Un `Option<u32>` costaría el doble de memoria, y sobre 4 Mpx son 16 MB de más
 /// para distinguir un caso que ya tiene un valor imposible libre.
 pub const NONE: u32 = u32::MAX;
+
+/// Hasta dónde puede arrastrarse un color que no se ha ganado entrada propia,
+/// en múltiplos de `tolerance`. Más lejos que esto funda entrada por raro que
+/// sea.
+///
+/// Sin él, `min_color_share` sale sin cota ninguna: el criterio es *píxeles por
+/// distancia*, así que a un color con pocos píxeles se le puede pedir una
+/// distancia enorme, y en una imagen de 5 Mpx un lunar saturado de 30x30 se
+/// quedaría sin su color. Con él, lo que está lejos de todo siempre se lleva
+/// entrada —que es el caso que hay que proteger— y lo que está pegado a un color
+/// que ya existe se absorbe —que es el ruido de los bordes.
+///
+/// Dónde ponerlo, medido en entradas de la paleta:
+///
+/// | techo | cover.jpg | Sonic1.png |
+/// | --- | --- | --- |
+/// | 2x | 30 | 37 |
+/// | 3x | 20 | 24 |
+/// | **4x** | **20** | **21** |
+/// | 8x | 20 | 20 |
+/// | sin techo | 20 | 18 |
+///
+/// A `4x` está prácticamente todo lo que hay que ganar, y a cambio queda una cota
+/// que se puede escribir: **ningún píxel se pinta a más de `4 * tolerance` de su
+/// color**.
+pub const SNAP_CEILING: f64 = 4.0;
 
 /// Opciones de la segmentación por clustering.
 ///
@@ -115,6 +146,34 @@ pub struct ClusterOptions {
     /// del eje de la luz y deja el tono donde estaba. Ver
     /// [`Oklab::chroma_distance`].
     pub gradient_step: f64,
+    /// Lo que un color tiene que **valer** para llevarse una entrada propia, como
+    /// fracción de la imagen. `0` se la da a cualquiera, que era lo de antes.
+    ///
+    /// Sin esto la paleta crece con el ruido: la agrupación va por frecuencia,
+    /// pero la frecuencia sólo *ordena*, nunca frena, así que un color que
+    /// aparece treinta veces en toda la imagen funda entrada igual que el fondo.
+    /// Medido en la portada de un disco —un dibujo de cuatro planos de color y
+    /// trazo negro—, la paleta salía con 65 entradas de las que **42 pintaban
+    /// menos del 0,2% cada una y el 1,45% entre todas**: el *ringing* del JPEG
+    /// alrededor de los trazos, una entrada por escalón.
+    ///
+    /// El criterio no es el recuento a secas, porque no distingue dos cosas que
+    /// se parecen en el recuento y en nada más: cuarenta píxeles de *ringing*
+    /// repartidos por los bordes, y un lunar rojo de cuarenta píxeles. Lo que las
+    /// separa es **cuánto error se ahorra** teniendo la entrada: el *ringing* está
+    /// pegado a un color que ya existe y no ahorra casi nada; el lunar está lejos
+    /// de todo y ahorra mucho. Así que una entrada se gana el sitio cuando
+    ///
+    /// ```text
+    ///     píxeles del color * distancia a la entrada más cercana
+    ///         >= min_color_share * píxeles visibles * tolerance
+    /// ```
+    ///
+    /// que se lee: *la entrada nueva tiene que quitar al menos tanto error como
+    /// el de tener esta fracción de la imagen desviada una tolerancia*. Un color
+    /// que está al doble de la tolerancia necesita la mitad de píxeles; uno que
+    /// está a diez veces, la décima parte.
+    pub min_color_share: f64,
     /// Entradas máximas de la paleta. `0` no pone tope.
     ///
     /// Con tope, los colores que sobran van a la entrada más cercana **sin límite
@@ -143,6 +202,22 @@ impl Default for ClusterOptions {
             // mirando el resultado. Lo que hace por defecto la tolerancia ya
             // reparte una rampa en escalones; esto los ensancha a propósito.
             gradient_step: 0.0,
+            // Medido sobre tres imágenes que no se parecen en nada —la portada de
+            // un JPEG con trazo, un aerógrafo escaneado de 5 Mpx y un pixel art
+            // reescalado—, y las tres coinciden en el mismo sitio: es donde la
+            // paleta deja de tener entradas que no pintan nada y todavía no ha
+            // empezado a perder ninguna que sí.
+            //
+            // | imagen | antes | 0,001 | **0,002** | 0,005 |
+            // | --- | --- | --- | --- | --- |
+            // | cover.jpg | 68 | 27 | **20** | 12 |
+            // | Sonic1.png | 86 | 24 | **18** | 16 |
+            // | pixel art | 80 | 18 | **16** | 13 |
+            //
+            // A 0,005 la portada baja a doce y sigue estando bien —es un cartel de
+            // cuatro planos—, pero eso es una decisión de estilo y ésta es la que
+            // se toma sin mirar la imagen.
+            min_color_share: 0.002,
             max_colors: 0,
             palette: Vec::new(),
             remove_background: false,
@@ -455,6 +530,10 @@ impl Palette {
 
         let mut distinct: Vec<(Rgba, usize)> = counts.into_iter().collect();
         distinct.sort_by(|a, b| b.1.cmp(&a.1).then(order_key(a.0).cmp(&order_key(b.0))));
+        // Los píxeles visibles, que es contra lo que se mide si un color da para
+        // entrada propia. Sale de la misma cuenta y no de `w*h`: lo transparente
+        // no se pinta.
+        let visible: usize = distinct.iter().map(|&(_, n)| n).sum();
 
         // Con paleta impuesta las entradas están dadas y no se crea ninguna más;
         // si no, se van fundando por el camino.
@@ -466,35 +545,60 @@ impl Palette {
             .collect();
         let mut assignment = HashMap::with_capacity(distinct.len());
 
-        for (color, _) in distinct {
+        // Lo que tiene que ahorrar una entrada nueva para ganarse el sitio, en
+        // error de color acumulado. Ver `min_color_share`.
+        let budget = options.min_color_share * visible as f64 * options.tolerance;
+
+        for (color, count) in distinct {
             let lab = Oklab::from(color);
             // Se puede fundar una entrada nueva mientras no haya paleta impuesta
             // ni se haya llegado al tope.
             let can_add = !fixed && (options.max_colors == 0 || entries.len() < options.max_colors);
-            let near = entries
-                .iter()
-                .enumerate()
-                .map(|(i, &(_, entry_lab))| (i, lab.distance(&entry_lab), entry_lab))
-                .filter(|&(_, d, entry_lab)| {
-                    // Dentro de la tolerancia, o sólo más lejos en luz de lo que
-                    // `gradient_step` permite ensanchar la banda.
-                    !can_add
-                        || d <= options.tolerance
-                        || (lab.chroma_distance(&entry_lab) <= options.tolerance
-                            && lab.lightness_gap(&entry_lab) <= options.gradient_step)
-                })
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(i, _, _)| i);
-
-            let index = match near {
-                Some(i) => i,
-                None => {
-                    // Sin candidata y sin poder fundar: sólo pasa si la paleta
-                    // impuesta está vacía, y entonces `fixed` es falso.
-                    debug_assert!(can_add, "ningún destino para {color:?}");
-                    entries.push((color, lab));
-                    entries.len() - 1
+            // Dos mínimos, y hacen falta los dos por separado. `serviria` es la
+            // más cercana **de las que le valen**, que es a la que se asigna; y
+            // `cercana` es la más cercana sin más, que es contra la que se mide si
+            // merece la pena fundar una entrada. No se puede sacar la segunda de
+            // la primera ni al revés: con `gradient_step` la entrada más cercana
+            // puede no valer mientras que otra un poco más lejos sí.
+            let mut serviria: Option<(usize, f64)> = None;
+            let mut cercana: Option<(usize, f64)> = None;
+            for (i, &(_, entry_lab)) in entries.iter().enumerate() {
+                let d = lab.distance(&entry_lab);
+                // Estrictamente menor: a igualdad se queda la primera, que es la
+                // que fundó antes y por tanto la del color más presente.
+                if cercana.is_none_or(|(_, best)| d < best) {
+                    cercana = Some((i, d));
                 }
+                // Dentro de la tolerancia, o sólo más lejos en luz de lo que
+                // `gradient_step` permite ensanchar la banda.
+                let vale = !can_add
+                    || d <= options.tolerance
+                    || (lab.chroma_distance(&entry_lab) <= options.tolerance
+                        && lab.lightness_gap(&entry_lab) <= options.gradient_step);
+                if vale && serviria.is_none_or(|(_, best)| d < best) {
+                    serviria = Some((i, d));
+                }
+            }
+
+            let index = match serviria {
+                Some((i, _)) => i,
+                // Ninguna entrada le vale. Aquí `can_add` es siempre cierto: con
+                // la paleta llena el filtro de arriba deja pasar todo. Así que o
+                // se gana una entrada nueva, o se va con la más cercana aunque
+                // quede lejos —que es lo que hace que la paleta deje de crecer
+                // con el ruido de los bordes.
+                None => match cercana {
+                    Some((i, d))
+                        if d <= options.tolerance * SNAP_CEILING && (count as f64) * d < budget =>
+                    {
+                        i
+                    }
+                    _ => {
+                        debug_assert!(can_add, "ningún destino para {color:?}");
+                        entries.push((color, lab));
+                        entries.len() - 1
+                    }
+                },
             };
             assignment.insert(color, (index as u32, lab));
         }

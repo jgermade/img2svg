@@ -31,6 +31,8 @@ export interface PhotoOptions extends FitOptions {
     minThickness?: number;
     /** Escalón de un degradado: separación mínima entre entradas de la paleta. */
     gradientStep?: number;
+    /** Parte de la imagen que un color tiene que valer para tener entrada propia. */
+    minColorShare?: number;
     /** Tope de colores de la paleta. */
     maxColors?: number;
     /** Quitar el color de fondo. */

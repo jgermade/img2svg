@@ -259,7 +259,12 @@ fn choose(
     let error = |entry: u32| lab.distance(&entry_lab[entry as usize]);
     // El techo de error: lo que la paleta ya había asumido para este píxel. Ver
     // la nota del módulo sobre por qué esto no puede saltarse.
-    let ceiling = tolerance.max(error(current)) * CEILING;
+    // Lo que ya estaba dispuesto a aceptar, o el techo, lo que sea mayor. Y no
+    // `max(tolerance, error) * CEILING`, que es lo mismo mientras la paleta
+    // respete su tolerancia pero se dispara al componerlo con `SNAP_CEILING`: un
+    // píxel arrastrado a 4x tendría permiso para irse a 8x. Así, componer no
+    // afloja la cota.
+    let ceiling = (tolerance * CEILING).max(error(current));
 
     let mut best = current;
     let mut best_cost = error(current) + beta * f64::from(visible - agree);

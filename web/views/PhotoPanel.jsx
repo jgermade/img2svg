@@ -83,6 +83,17 @@ export function PhotoPanel({ hidden, values: v, onChange, actions }) {
 
       <Advanced>
         <Range
+          label="Mínimo para tener color propio"
+          suffix="%"
+          value={v.minColorShare}
+          min="0"
+          max="1"
+          step="0.05"
+          hint="Lo que un color tiene que valer para llevarse una entrada de la paleta. La agrupación va por frecuencia, pero la frecuencia sólo ordena y nunca frena, así que el ringing de un JPEG alrededor de un trazo negro deja una entrada por escalón. No se mide por recuento —que no distingue el ringing de un lunar del mismo tamaño— sino por el error que la entrada ahorra, así que lo que está lejos de todo conserva el suyo por poco que pinte."
+          onChange={set("minColorShare")}
+        />
+
+        <Range
           label="Filtro de motas"
           value={v.filterSpeckle}
           min="0"

@@ -53,13 +53,15 @@ fn imagen(rows: &[&str], paleta: &[(char, Rgba)]) -> RgbaImage {
     img
 }
 
-/// Las opciones de este fichero, con el filtrado de motas **apagado**: aquí se
-/// prueba el agrupado y no el filtro, y con el umbral por defecto —cuatro
-/// píxeles— casi cualquier región de un dibujo de ejemplo sería una mota.
-/// Las tres etapas que funden, apagadas: son las que gastan la cota de color de
-/// la paleta, y casi todo lo que se afirma aquí es sobre la paleta.
+/// Las opciones de este fichero, con **todo lo que funde apagado**: el filtrado
+/// de motas y el de grosor, porque aquí se prueba el agrupado y no el filtro —con
+/// el umbral por defecto, cuatro píxeles, casi cualquier región de un dibujo de
+/// ejemplo sería una mota—, y el suelo de la paleta y la regularización, porque
+/// son las dos etapas que gastan la cota de color y casi todo lo que se afirma
+/// aquí es sobre la cota estrecha.
 fn opciones() -> ClusterOptions {
     ClusterOptions {
+        min_color_share: 0.0,
         smoothing: 0,
         filter_speckle: 0,
         min_thickness: 0.0,
@@ -292,22 +294,29 @@ fn ningun_pixel_se_pinta_mas_lejos_de_la_tolerancia() {
 }
 
 #[test]
-fn la_regularizacion_gasta_la_tolerancia_pero_con_techo() {
-    // El suavizado mueve píxeles por razones de vecindad, así que la cota de
-    // arriba deja de valer tal cual. Lo que no puede hacer es soltarse: el techo
-    // es `smooth::CEILING` veces la tolerancia, y esto lo comprueba sobre la misma
-    // rampa, que es donde hay fronteras de decisión en cada columna.
+fn con_los_valores_por_defecto_la_cota_es_la_del_arrastre() {
+    // Las dos etapas que gastan la cota y vienen puestas de fábrica —el suelo de
+    // la paleta y la regularización— tienen que **componer sin aflojarse**: la
+    // cota conjunta es la más ancha de las dos, no la suma ni el producto. Se
+    // prueba sobre la rampa, que es donde hay una frontera de decisión en cada
+    // columna y por tanto donde las dos tienen más ocasión de morder.
     let options = ClusterOptions {
-        smoothing: 4,
-        ..opciones()
+        filter_speckle: 0,
+        min_thickness: 0.0,
+        ..ClusterOptions::default()
     };
+    assert!(
+        options.min_color_share > 0.0 && options.smoothing > 0,
+        "las dos vienen puestas"
+    );
+
     let mut img = RgbaImage::new(256, 32);
     for (x, y, px) in img.enumerate_pixels_mut() {
         *px = image::Rgba([x as u8, (y * 8) as u8, 255 - x as u8, 255]);
     }
     let c = cluster::from_image(&img, &options);
 
-    let techo = options.tolerance * img2svg::smooth::CEILING;
+    let techo = options.tolerance * cluster::SNAP_CEILING;
     let mut peor = 0.0f64;
     for (i, &label) in c.labels.iter().enumerate() {
         let px = &img.as_raw()[i * 4..i * 4 + 4];
@@ -321,10 +330,97 @@ fn la_regularizacion_gasta_la_tolerancia_pero_con_techo() {
         );
         peor = peor.max(d);
     }
-    // Y de hecho se queda muy por debajo del techo: se paga por unos pocos
-    // píxeles de frontera, no por todos.
-    assert!(peor > options.tolerance, "no ha movido nada: {peor}");
-    println!("peor desvío tras regularizar: {peor:.4} (techo {techo:.4})");
+    assert!(
+        peor > options.tolerance,
+        "no ha gastado nada de la cota: {peor}"
+    );
+    println!("peor desvío con los valores por defecto: {peor:.4} (techo {techo:.4})");
+}
+
+/// Un plano de rojo con `n` píxeles de otro color estampados en una esquina.
+///
+/// Se construye a mano y no con [`imagen`] porque lo que se prueba aquí es una
+/// fracción de la imagen, y para que el presupuesto signifique algo hace falta un
+/// lienzo de miles de píxeles, no un dibujito de dieciséis de lado.
+fn plano_con_mancha(n: usize, color: Rgba) -> RgbaImage {
+    let mut img = RgbaImage::from_pixel(64, 64, image::Rgba([ROJO.r, ROJO.g, ROJO.b, ROJO.a]));
+    for i in 0..n {
+        img.put_pixel(
+            (i % 64) as u32,
+            (i / 64) as u32,
+            image::Rgba([color.r, color.g, color.b, color.a]),
+        );
+    }
+    img
+}
+
+fn colores_de(img: &RgbaImage, options: &ClusterOptions) -> Vec<String> {
+    cluster::from_image(img, options)
+        .clusters
+        .iter()
+        .map(|k| k.color.to_hex())
+        .collect()
+}
+
+/// Las opciones por defecto sin nada que funda regiones, para mirar sólo la
+/// paleta.
+fn solo_paleta() -> ClusterOptions {
+    ClusterOptions {
+        smoothing: 0,
+        filter_speckle: 0,
+        min_thickness: 0.0,
+        ..ClusterOptions::default()
+    }
+}
+
+#[test]
+fn el_mismo_color_funda_entrada_o_no_segun_cuanto_pinte() {
+    // El término del recuento de `min_color_share`, aislado: el **mismo** color a
+    // la **misma** distancia del rojo (0,062 en Oklab, o sea fuera de la
+    // tolerancia y dentro del techo), tres píxeles en un caso y seiscientos en el
+    // otro. Antes los dos fundaban entrada, porque la frecuencia sólo ordenaba.
+    let borde = Rgba::new(214, 82, 41, 255);
+    let options = solo_paleta();
+
+    let pocos = colores_de(&plano_con_mancha(3, borde), &options);
+    assert!(
+        !pocos.contains(&borde.to_hex()),
+        "tres píxeles no dan para entrada propia: {pocos:?}"
+    );
+
+    let muchos = colores_de(&plano_con_mancha(600, borde), &options);
+    assert!(
+        muchos.contains(&borde.to_hex()),
+        "seiscientos sí: {muchos:?}"
+    );
+
+    // Y sin suelo vuelven los dos, que es lo que dice que la diferencia la hace
+    // el suelo y no otra cosa del camino.
+    let sin_suelo = colores_de(
+        &plano_con_mancha(3, borde),
+        &ClusterOptions {
+            min_color_share: 0.0,
+            ..options
+        },
+    );
+    assert!(
+        sin_suelo.contains(&borde.to_hex()),
+        "sin suelo funda cualquiera: {sin_suelo:?}"
+    );
+}
+
+#[test]
+fn un_color_lejano_funda_entrada_por_raro_que_sea() {
+    // El techo, aislado. Un verde saturado está a 0,35 del rojo —más de
+    // `SNAP_CEILING` veces la tolerancia—, así que se lleva entrada con tres
+    // píxeles, los mismos con los que el rojo de borde del test anterior no se
+    // la llevaba. Es lo que protege un lunar pequeño de acabar del color del
+    // plano que lo rodea.
+    let colores = colores_de(&plano_con_mancha(3, VERDE), &solo_paleta());
+    assert!(
+        colores.contains(&VERDE.to_hex()),
+        "lo que está lejos de todo funda entrada aunque casi no pinte: {colores:?}"
+    );
 }
 
 #[test]

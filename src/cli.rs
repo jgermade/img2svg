@@ -231,6 +231,19 @@ struct Photo {
     #[arg(long, default_value_t = ClusterOptions::default().gradient_step)]
     gradient_step: f64,
 
+    /// Lo que un color tiene que valer para llevarse una entrada propia, como
+    /// fracción de la imagen (0 se la da a cualquiera).
+    ///
+    /// La agrupación va por frecuencia, pero la frecuencia sólo ordena y nunca
+    /// frena: un color que sale treinta veces en toda la imagen funda entrada
+    /// igual que el fondo, y por eso el ringing de un JPEG alrededor de un trazo
+    /// negro deja una entrada por escalón. No se mide por recuento, que no
+    /// distingue el ringing de un lunar del mismo tamaño, sino por el error que
+    /// la entrada ahorra: píxeles por distancia a la entrada más cercana. Un
+    /// color al doble de la tolerancia necesita la mitad de píxeles.
+    #[arg(long, default_value_t = ClusterOptions::default().min_color_share)]
+    min_color_share: f64,
+
     /// Entradas máximas de la paleta (0 no pone tope).
     ///
     /// Con tope, los colores que sobran van a la entrada más cercana aunque
@@ -257,6 +270,7 @@ impl Photo {
             filter_speckle: self.filter_speckle,
             min_thickness: self.min_thickness,
             gradient_step: self.gradient_step,
+            min_color_share: self.min_color_share,
             max_colors: self.max_colors,
             // Una paleta impuesta es una lista de colores, y parsearla pide una
             // sintaxis que nadie ha pedido todavía. Está en la biblioteca.

@@ -85,6 +85,7 @@ exists.
 | `filter_speckle: usize` | `4` | Area up to which a region merges into a neighbour. `0` merges nothing. |
 | `min_thickness: f64` | `1.0` | Thickness (`2 × area / perimeter`) below which a region merges into a neighbour. `1.0` is a 2×2 block, so it removes everything one pixel wide. |
 | `gradient_step: f64` | `0.0` | How much *lightness* difference is merged past the tolerance. Widens gradient bands; flattens shading. |
+| `min_color_share: f64` | `0.002` | What a colour has to be worth, as a fraction of the image, to get an entry of its own. `0` gives one to anybody. Loosens the tolerance guarantee to `cluster::SNAP_CEILING` × it. |
 | `max_colors: usize` | `0` | Cap on palette entries. `0` is no cap. Drops the tolerance guarantee. |
 | `palette: Vec<Rgba>` | empty | An imposed palette. Non-empty means exactly this palette, nothing added. |
 | `remove_background: bool` | `false` | Clear the flat background and crop. |
