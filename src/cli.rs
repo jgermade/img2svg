@@ -48,8 +48,17 @@ struct Common {
     background: Option<String>,
 
     /// Cómo se convierte el contorno de una región en datos de path.
-    #[arg(long, value_enum, default_value_t = FitArg::Pixel)]
-    fit: FitArg,
+    ///
+    /// Por defecto, `pixel` en pixelart y `polygon` en photo, que es lo que
+    /// quiere cada uno: en un sprite la escalera **es** el dibujo y redondearla
+    /// sería estropearlo, mientras que en una foto no hay ninguna escalera que
+    /// preservar —sólo la de la retícula de píxeles— y enderezarla quita entre un
+    /// 23% y un 32% del fichero sin que se note en el dibujo.
+    ///
+    /// No puede ir en `default_value_t` porque no es el mismo para los dos
+    /// subcomandos; lo resuelve [`Common::fit`].
+    #[arg(long, value_enum)]
+    fit: Option<FitArg>,
 
     /// Desviación máxima en píxeles al ajustar el contorno.
     ///
@@ -84,8 +93,9 @@ enum FitArg {
 }
 
 impl Common {
-    fn fit(&self) -> Fit {
-        match self.fit {
+    /// El ajustador pedido, o el que trae de fábrica la segmentación que llama.
+    fn fit(&self, default: FitArg) -> Fit {
+        match self.fit.unwrap_or(default) {
             FitArg::Pixel => Fit::Pixel,
             FitArg::Polygon => Fit::Polygon {
                 tolerance: self.tolerance(Fit::TOLERANCE),
@@ -159,7 +169,8 @@ impl Pixelart {
         };
         Config {
             background: self.common.background.clone(),
-            fit: self.common.fit(),
+            // La escalera de un sprite es el dibujo, no un artefacto.
+            fit: self.common.fit(FitArg::Pixel),
             ..Config::grid(grid)
         }
     }
@@ -279,7 +290,9 @@ impl Photo {
         };
         Config {
             background: self.common.background.clone(),
-            fit: self.common.fit(),
+            // Aquí la escalera es sólo la retícula de píxeles, y enderezarla no
+            // cuesta dibujo: quita entre un 23% y un 32% del fichero.
+            fit: self.common.fit(FitArg::Polygon),
             ..Config::cluster(cluster)
         }
     }

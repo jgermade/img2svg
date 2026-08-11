@@ -48,7 +48,10 @@ lienzo 662x1079, 1099 regiones
 decision from how the image becomes regions. `pixel` writes the staircase of
 pixel edges literally; `polygon` straightens it into segments, which takes 12–30%
 off the file depending on the tolerance; `spline` fits cubic Béziers, keeping the
-corners sharp:
+corners sharp. The default differs by subcommand, because the two disagree about
+what a staircase is: in a sprite it **is** the drawing, so `pixelart` writes it
+literally, while in a photo it is only the pixel grid showing through, so `photo`
+straightens it.
 
 ```sh
 ./target/release/img2svg photo label.png --fit polygon

@@ -208,6 +208,24 @@ On the same illustration, subpaths against passes:
 It pays for itself: at two passes the whole conversion runs 0.79 s against 0.84 s
 with it off, because the boundary and document stages have that much less to do.
 
+**What did not need retuning.** With regularisation and the palette floor in
+place, the other three photo defaults were re-measured and all three stayed:
+
+- `min_thickness: 1.0` still earns its keep — dropping it to `0.5` on the
+  illustration takes paths from 551 back up to 921. Regularisation removes
+  *flicker*, but a one-pixel antialiasing band along an edge is a coherent
+  structure whose pixels agree with each other, so it survives the criterion by
+  design and this is still what removes it.
+- `filter_speckle: 4` is right for small images and only for those. At 16 the
+  glasses on a 300×300 cover lose their rims, while a 5 Mpx painting takes 16 or
+  32 with nothing visible lost and 2.7× fewer paths. The threshold is an absolute
+  pixel count and so does not scale with the canvas — worth turning into a
+  fraction the way `min_color_share` is, but that is an API change and not this
+  session's.
+- `tolerance: 0.045` sits where it did. The palette floor took over the job of
+  keeping the entry count down, so raising the tolerance is now purely a
+  fidelity–flatness choice rather than a way to fight the entry count.
+
 **Speck filtering** (`speckle.rs`). Regularisation flattens the flicker but not
 compact blobs — a blob's interior has no neighbours to disagree with, so it is a
 local minimum of the criterion and only erodes a ring per pass. That is what this

@@ -105,7 +105,10 @@ export const MODES = {
       // wasm va en tanto por uno.
       minColorShare: 0.2,
       gradientStep: 0,
-      fit: "pixel",
+      // A diferencia de pixelart, aquí no hay ninguna escalera que preservar
+      // —sólo la de la retícula—, y enderezarla quita entre un 23% y un 32% del
+      // fichero sin que se note en el dibujo.
+      fit: "polygon",
       fitTolerance: 0.75,
       removeBackground: false,
       filterSpeckle: 4,

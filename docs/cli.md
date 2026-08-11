@@ -29,7 +29,7 @@ subcommand.
 | `<INPUT>` | | Input image. PNG, JPEG, GIF, BMP or WebP. |
 | `-o, --output <FILE>` | input`.svg` | Output file. |
 | `-b, --background <COLOUR>` | none | Adds a background rectangle, e.g. `"#ffffff"`. |
-| `--fit <pixel\|polygon\|spline>` | `pixel` | How a contour becomes path data. See below. |
+| `--fit <pixel\|polygon\|spline>` | `pixel` on `pixelart`, `polygon` on `photo` | How a contour becomes path data. See below. |
 | `--fit-tolerance <N>` | per fitter | Maximum deviation in pixels: 0.75 for `polygon`, 1.5 for `spline`. |
 | `-q, --quiet` | off | Silences the report on stderr. |
 
@@ -38,6 +38,13 @@ subcommand.
 The subcommand chooses how the image becomes regions; `--fit` chooses how a
 region's contour becomes path data. They are independent, which is why this one
 is shared.
+
+Its default is not, though, because the two subcommands disagree about what a
+staircase *is*. In a sprite the staircase **is** the drawing and rounding it off
+would be vandalism, so `pixelart` defaults to `pixel`. In a photo there is no
+staircase to preserve — only the one the pixel grid imposes — so `photo` defaults
+to `polygon`, which took 23% off an illustration and 32% off a 5 Mpx painting with
+nothing visible lost.
 
 `pixel` writes the contour literally, as the staircase of pixel edges it is.
 `polygon` runs Ramer–Douglas–Peucker over it and keeps only the vertices that
