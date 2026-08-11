@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "img2svg"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "clap",
  "image",
