@@ -139,6 +139,7 @@ Takes the same [shared options](#shared-options). Its own:
 | --- | --- | --- |
 | `-t, --tolerance <N>` | `0.045` | Maximum Oklab distance between a colour and the region that paints it. The scale is perceptual and runs 0 to 1: black to white is `1.0`. |
 | `-c, --color-precision <N>` | `5` | Bits per channel the colour is cut to before grouping. |
+| `--smoothing <N>` | `2` | Passes that regularise the palette assignment against each pixel's neighbourhood. `0` turns it off. |
 | `-a, --alpha-threshold <N>` | `128` | Minimum alpha for a pixel to count as visible. |
 | `--filter-speckle <N>` | `4` | Area in pixels up to which a region merges into a neighbour. |
 | `--min-thickness <N>` | `1` | Thickness below which a region merges into a neighbour, however large its area. |

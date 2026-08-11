@@ -184,6 +184,20 @@ struct Photo {
     #[arg(short, long, default_value_t = ClusterOptions::default().color_precision)]
     color_precision: u8,
 
+    /// Pasadas de regularización de la paleta mirando el vecindario (0 la apaga).
+    ///
+    /// La paleta asigna cada píxel por su cuenta, así que en cuanto el ruido del
+    /// original se acerca a --tolerance dos píxeles vecinos de una zona lisa caen
+    /// en entradas distintas y la zona sale rota en motas. Esto lo deshace
+    /// pesando el parecido de color contra el acuerdo con los vecinos, que es lo
+    /// que distingue un píxel de grano —igual de cerca de las dos entradas— de un
+    /// trazo fino, que está lejísimos de la del fondo y sobrevive.
+    ///
+    /// Cada pasada raspa una corona de las motas compactas. Subirlo redondea el
+    /// detalle pequeño; a 0, el comportamiento de antes.
+    #[arg(long, default_value_t = ClusterOptions::default().smoothing)]
+    smoothing: usize,
+
     /// Alfa mínimo para considerar un píxel visible.
     #[arg(short = 'a', long, default_value_t = ClusterOptions::default().alpha_threshold)]
     alpha_threshold: u8,
@@ -238,6 +252,7 @@ impl Photo {
         let cluster = ClusterOptions {
             color_precision: self.color_precision,
             tolerance: self.tolerance,
+            smoothing: self.smoothing,
             alpha_threshold: self.alpha_threshold,
             filter_speckle: self.filter_speckle,
             min_thickness: self.min_thickness,

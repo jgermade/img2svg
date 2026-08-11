@@ -32,6 +32,8 @@ pub mod grid;
 pub mod region;
 pub mod segment;
 #[cfg(feature = "photo")]
+pub mod smooth;
+#[cfg(feature = "photo")]
 pub mod speckle;
 pub mod svg;
 pub mod trace;
@@ -254,8 +256,12 @@ impl Conversion {
 pub enum Stage {
     /// Contar colores y construir la paleta.
     Palette,
-    /// Etiquetar las regiones conexas.
+    /// Asignar a cada píxel su entrada de la paleta.
     Regions,
+    /// Regularizar esa asignación mirando el vecindario.
+    Smoothing,
+    /// Recorrer los tramos y etiquetar las regiones conexas.
+    Runs,
     /// Fundir las motas en sus vecinas.
     Speckle,
     /// Extraer las fronteras y armar los anillos.
@@ -268,11 +274,13 @@ impl Stage {
     /// Dónde empieza y cuánto ocupa, del total.
     fn span(self) -> (f64, f64) {
         match self {
-            Stage::Palette => (0.00, 0.30),
-            Stage::Regions => (0.30, 0.36),
-            Stage::Speckle => (0.66, 0.10),
-            Stage::Boundaries => (0.76, 0.17),
-            Stage::Document => (0.93, 0.07),
+            Stage::Palette => (0.00, 0.25),
+            Stage::Regions => (0.25, 0.14),
+            Stage::Smoothing => (0.39, 0.18),
+            Stage::Runs => (0.57, 0.10),
+            Stage::Speckle => (0.67, 0.08),
+            Stage::Boundaries => (0.75, 0.19),
+            Stage::Document => (0.94, 0.06),
         }
     }
 }

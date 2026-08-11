@@ -21,6 +21,8 @@ export interface PhotoOptions extends FitOptions {
     colorPrecision?: number;
     /** Distancia de color por debajo de la cual dos píxeles son el mismo. */
     tolerance?: number;
+    /** Pasadas que regularizan la paleta mirando el vecindario; 0 la apaga. */
+    smoothing?: number;
     /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
     alphaThreshold?: number;
     /** Área mínima, en píxeles, para que una región sobreviva. */
@@ -183,7 +185,6 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_conversion_free: (a: number, b: number) => void;
-    readonly __wbg_photoconversion_free: (a: number, b: number) => void;
     readonly conversion_background: (a: number) => [number, number];
     readonly conversion_cellHeight: (a: number) => number;
     readonly conversion_cellWidth: (a: number) => number;
@@ -199,14 +200,15 @@ export interface InitOutput {
     readonly conversion_svg: (a: number) => [number, number];
     readonly convertPhoto: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
     readonly convertRgba: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
-    readonly photoconversion_background: (a: number) => [number, number];
     readonly photoconversion_regions: (a: number) => number;
-    readonly photoconversion_svg: (a: number) => [number, number];
     readonly photoconversion_canvasHeight: (a: number) => number;
     readonly photoconversion_canvasWidth: (a: number) => number;
     readonly photoconversion_colors: (a: number) => number;
     readonly photoconversion_paths: (a: number) => number;
     readonly photoconversion_subpaths: (a: number) => number;
+    readonly __wbg_photoconversion_free: (a: number, b: number) => void;
+    readonly photoconversion_background: (a: number) => [number, number];
+    readonly photoconversion_svg: (a: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

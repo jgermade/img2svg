@@ -33,6 +33,17 @@ export function PhotoPanel({ hidden, values: v, onChange, actions }) {
       />
 
       <Range
+        label="Regularizar la paleta"
+        suffix="pasadas"
+        value={v.smoothing}
+        min="0"
+        max="6"
+        step="1"
+        hint="La paleta decide color a color, sin mirar alrededor, así que el grano de una foto rompe en motas lo que se ve liso. Esto lo deshace pesando el parecido de color contra el acuerdo con los vecinos: un píxel de grano se funde y un trazo fino no. Cada pasada raspa una corona; a 0, sin regularizar."
+        onChange={set("smoothing")}
+      />
+
+      <Range
         label="Escalón de degradado"
         value={v.gradientStep}
         min="0"

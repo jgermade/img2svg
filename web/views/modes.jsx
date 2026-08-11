@@ -100,6 +100,7 @@ export const MODES = {
     ),
     defaults: {
       tolerance: 0.045,
+      smoothing: 2,
       gradientStep: 0,
       fit: "pixel",
       fitTolerance: 0.75,
@@ -116,6 +117,7 @@ export const MODES = {
     options(v) {
       const opts = {
         tolerance: v.tolerance,
+        smoothing: v.smoothing,
         gradientStep: v.gradientStep,
         filterSpeckle: v.filterSpeckle,
         minThickness: v.minThickness,

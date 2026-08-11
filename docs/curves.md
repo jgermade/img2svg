@@ -76,6 +76,14 @@ merges swallows the whole sky, which ends up one flat region matching neither of
 its ends. With the palette fixed up front the error is bounded by construction
 and does not depend on where the sweep started.
 
+That bound belongs to the palette, and the stages that **merge** are the ones
+that spend it, each at a stated price: regularisation may worsen a pixel by up to
+`smooth::CEILING` × the tolerance, and only towards a colour already painted next
+to it; speck filtering has no bound at all, since a speck leaves with whatever
+neighbour it merges into. Turn all three off — `smoothing: 0`, `filter_speckle: 0`,
+`min_thickness: 0` — and the guarantee reads exactly as written above, which is
+how `tests/cluster.rs` checks it.
+
 The labelling works on **runs** — horizontal spans of equal palette entry — not
 on pixels. A flood fill over four million pixels is millions of stack pushes with
 no locality; merging the runs of two adjacent rows is a two-pointer walk with
@@ -116,7 +124,54 @@ has now held across roughly 285,000 chains of a noisy 1.4 Mpx image.
 Measured end to end on the 4.2 Mpx corpus image: 340 ms clustering, 112 ms
 boundaries, 30 ms to write the SVG.
 
-**Speck filtering** (`speckle.rs`). Without it the output is not usable: a real
+**Spatial regularisation** (`smooth.rs`). The palette decides its entries by
+looking at the whole image and then assigns **every pixel independently** to the
+nearest one — nothing in that chain knows a pixel has neighbours. Measured on a
+scanned airbrush illustration, over 24×24 windows the eye reads as one flat
+colour, one pixel in ten sits further from its own window's mean than the whole
+tolerance (p90 0.032, max 0.071, against 0.045). So adjacent pixels of a flat
+area land on different entries, and connected components turns that flicker into
+islands: 12,954 regions, 8,911 of them under 16 px, painting 6% of the canvas and
+making up 97% of the paths.
+
+The obvious fix — each pixel takes the commonest label around it — removes the
+noise and takes every thin stroke with it: a one-pixel line is outvoted three to
+six inside its own 3×3, however black it is on however white a background. What a
+vote is missing is the other half of the question, how much the pixel *resembles*
+the colour being proposed. So each pixel minimises
+
+```text
+    cost(c) = distance(pixel colour, c) + beta × neighbours that are not c
+```
+
+which is one ICM step over a Markov field, iterated a few times out of place. A
+grain pixel sits halfway between two entries — that is why it flipped — so
+coherence decides it; a pixel of black line is 0.9 away from the background entry,
+which no majority can buy. Two guards keep it honest: a pixel may only move to an
+entry **already present in its own neighbourhood**, and only if that leaves it
+agreeing with *more* neighbours than it does now. Without the second, the colour
+term breaks ties on straight boundaries and serrates them.
+
+On the same illustration, subpaths against passes:
+
+| passes | regions | subpaths | SVG |
+| --- | --- | --- | --- |
+| 0 | 12,954 | 41,548 | 2,468 KB |
+| 1 | 12,148 | 22,267 | 1,754 KB |
+| **2** | **10,151** | **17,003** | **1,468 KB** |
+| 4 | 8,200 | 12,971 | 1,246 KB |
+
+It pays for itself: at two passes the whole conversion runs 0.79 s against 0.84 s
+with it off, because the boundary and document stages have that much less to do.
+
+**Speck filtering** (`speckle.rs`). Regularisation flattens the flicker but not
+compact blobs — a blob's interior has no neighbours to disagree with, so it is a
+local minimum of the criterion and only erodes a ring per pass. That is what this
+is for, and the two compose: at two passes plus `--filter-speckle 32` the same
+image goes to 1,974 regions and 3,397 subpaths, where the filter alone — at 64,
+twice as hard — left 1,881 regions carrying 14,405 subpaths behind.
+
+Without it the output is not usable: a real
 image leaves clustering with 12k–31k regions, and each one is a `<path>`.
 
 Looking at a magnified conversion shows two different kinds of speck, and only one

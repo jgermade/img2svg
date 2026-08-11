@@ -14,7 +14,7 @@
 //! de escrituras de máscara y 200 inundaciones sobre la imagen entera: no es que
 //! vaya lento, es que no termina.
 //!
-//! # El orden de las tres etapas
+//! # El orden de las cuatro etapas
 //!
 //! 1. **Cuantizar** cada píxel a `2^bits` niveles por canal
 //!    ([`Rgba::quantize`]). Cuesta lo mismo por píxel sea la imagen que sea y
@@ -22,7 +22,11 @@
 //! 2. **Construir la paleta** agrupando los colores distintos por cercanía en
 //!    Oklab, del más frecuente al menos. Cada color queda asignado a un
 //!    representante a menos de `tolerance` de él.
-//! 3. **Etiquetar las componentes conexas** de igual representante.
+//! 3. **Regularizar** la asignación mirando el vecindario de cada píxel
+//!    ([`crate::smooth`]), porque los dos pasos anteriores tratan cada píxel
+//!    como si estuviera solo en el mundo y el ruido del original decide por
+//!    ellos en cuanto se acerca a la tolerancia.
+//! 4. **Etiquetar las componentes conexas** de igual representante.
 //!
 //! Que la paleta se decida *antes* de recorrer la imagen es lo que da la
 //! garantía que importa: **ningún píxel queda a más de `tolerance` del color con
@@ -33,9 +37,21 @@
 //! ninguno de sus extremos—. Con la paleta fija de antemano el error está acotado
 //! por construcción y no depende de por dónde se haya empezado a recorrer.
 //!
+//! Esa cota es de la paleta, y las etapas que **funden** son las que la gastan,
+//! cada una con su precio dicho:
+//!
+//! | etapa | qué puede empeorar el color de un píxel |
+//! | --- | --- |
+//! | [`crate::smooth`] | hasta [`crate::smooth::CEILING`] veces la tolerancia, y sólo a un color que ya se pintaba pegado a él |
+//! | [`crate::speckle`] | sin cota: una mota se va con su vecina, sea del color que sea |
+//!
+//! Con las dos apagadas —`smoothing: 0`, `filter_speckle: 0`,
+//! `min_thickness: 0`— la garantía vale tal cual está escrita, y así es como la
+//! comprueba `tests/cluster.rs`.
+//!
 //! # Por qué por tramos y no por píxel
 //!
-//! La tercera etapa va por **tramos** —secuencias horizontales de igual
+//! La cuarta etapa va por **tramos** —secuencias horizontales de igual
 //! representante— y no píxel a píxel. Un relleno por inundación sobre 4 millones
 //! de píxeles son millones de apilamientos sin localidad ninguna; una foto se
 //! reduce a bastantes menos tramos que píxeles, y unir los de dos filas
@@ -48,7 +64,7 @@ use image::RgbaImage;
 
 use crate::background;
 use crate::color::{Oklab, Rgba};
-use crate::speckle;
+use crate::{smooth, speckle};
 use crate::{Progress, Stage};
 
 /// Etiqueta de un píxel que no pertenece a ninguna región por ser transparente.
@@ -68,6 +84,13 @@ pub struct ClusterOptions {
     /// Distancia máxima en Oklab entre un color y su representante en la paleta.
     /// Ver [`Oklab::distance`] para la escala: `1.0` es de negro a blanco.
     pub tolerance: f64,
+    /// Pasadas de regularización espacial sobre la asignación de paleta. `0` deja
+    /// cada píxel donde lo puso la paleta. Ver [`crate::smooth`].
+    ///
+    /// Es un número de pasadas y no un umbral porque lo que se raspa es grosor:
+    /// una mota compacta de ruido se erosiona una corona por pasada, mientras que
+    /// un detalle que sí es dibujo no se mueve por muchas que se den.
+    pub smoothing: usize,
     /// Alfa mínimo para considerar visible un píxel.
     pub alpha_threshold: u8,
     /// Área hasta la que una región se funde con una vecina. `0` no funde nada.
@@ -112,6 +135,7 @@ impl Default for ClusterOptions {
         ClusterOptions {
             color_precision: 5,
             tolerance: 0.045,
+            smoothing: 2,
             alpha_threshold: 128,
             filter_speckle: 4,
             min_thickness: 1.0,
@@ -170,41 +194,62 @@ pub fn from_image_with(
 ) -> Clustering {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let palette = Palette::build(img, options, progress);
-    progress.stage(Stage::Regions);
+    let raw = img.as_raw();
 
+    // La entrada de paleta de cada píxel, antes de mirar a nadie. Se materializa
+    // entera y no fila a fila como antes porque la regularización necesita ver el
+    // vecindario, y eso incluye la fila de abajo.
+    progress.stage(Stage::Regions);
+    let mut field = vec![NONE; w * h];
+    for y in 0..h {
+        progress.at(y, h);
+        let base = y * w * 4;
+        for (x, px) in raw[base..base + w * 4].chunks_exact(4).enumerate() {
+            if let Some((entry, _)) = palette.lookup(px, options) {
+                field[y * w + x] = entry;
+            }
+        }
+    }
+
+    progress.stage(Stage::Smoothing);
+    smooth::regularize(
+        &mut field,
+        w,
+        h,
+        |i| palette.lab_at(&raw[i * 4..i * 4 + 4]),
+        &palette.entry_lab,
+        smooth::beta(options.tolerance),
+        options.tolerance,
+        options.smoothing,
+    );
+
+    progress.stage(Stage::Runs);
     let mut labels = vec![NONE; w * h];
     let mut sets = Sets::default();
     // El color de cada tramo. Todos los de una región comparten el mismo, porque
     // sólo se unen tramos de igual representante.
     let mut run_color: Vec<Rgba> = Vec::new();
 
-    // Los representantes de la fila en curso, para no repetir la búsqueda en la
-    // paleta al comparar un píxel con el siguiente.
-    let mut row: Vec<Option<Rgba>> = vec![None; w];
     let mut prev: Vec<Run> = Vec::new();
     let mut cur: Vec<Run> = Vec::new();
-    let raw = img.as_raw();
 
     for y in 0..h {
         progress.at(y, h);
-        let base = y * w * 4;
-        for (x, px) in raw[base..base + w * 4].chunks_exact(4).enumerate() {
-            row[x] = palette.lookup(px, options);
-        }
 
         cur.clear();
         let mut x = 0;
         while x < w {
-            let Some(color) = row[x] else {
+            let entry = field[y * w + x];
+            if entry == NONE {
                 x += 1;
                 continue;
-            };
+            }
             let start = x;
-            while x + 1 < w && row[x + 1] == Some(color) {
+            while x + 1 < w && field[y * w + x + 1] == entry {
                 x += 1;
             }
             let id = sets.push();
-            run_color.push(color);
+            run_color.push(palette.entries[entry as usize]);
             labels[y * w + start..=y * w + x].fill(id);
             cur.push(Run { start, end: x, id });
             x += 1;
@@ -356,10 +401,24 @@ pub(crate) fn order_key(c: Rgba) -> (u8, u8, u8, u8) {
     (c.r, c.g, c.b, c.a)
 }
 
-/// La paleta: de color cuantizado a color con el que se va a pintar.
+/// La paleta: de color cuantizado a la entrada con la que se va a pintar.
+///
+/// Guarda índices y no colores porque el campo de píxeles se regulariza antes de
+/// etiquetar ([`crate::smooth`]): comparar dos vecinos tiene que costar una
+/// comparación de enteros, y el término de color del criterio necesita el Oklab
+/// de cada entrada a mano, no recalculado por píxel.
 struct Palette {
     bits: u8,
-    representative: HashMap<Rgba, Rgba>,
+    /// De color cuantizado a (índice de su entrada, su propio Oklab). El Oklab
+    /// que se guarda es el del color **cuantizado**, que es sobre el que se
+    /// decidió la paleta: usar otro haría que el criterio de regularización y el
+    /// de agrupación midieran cosas distintas.
+    assignment: HashMap<Rgba, (u32, Oklab)>,
+    /// Las entradas, en el orden en que se fundaron.
+    entries: Vec<Rgba>,
+    /// Su color, indexado igual. Va aparte de `entries` porque la
+    /// regularización lo recorre por índice y no quiere arrastrar el `Rgba`.
+    entry_lab: Vec<Oklab>,
 }
 
 impl Palette {
@@ -405,7 +464,7 @@ impl Palette {
             .iter()
             .map(|&color| (color, Oklab::from(color)))
             .collect();
-        let mut representative = HashMap::with_capacity(distinct.len());
+        let mut assignment = HashMap::with_capacity(distinct.len());
 
         for (color, _) in distinct {
             let lab = Oklab::from(color);
@@ -414,7 +473,8 @@ impl Palette {
             let can_add = !fixed && (options.max_colors == 0 || entries.len() < options.max_colors);
             let near = entries
                 .iter()
-                .map(|&(entry, entry_lab)| (entry, lab.distance(&entry_lab), entry_lab))
+                .enumerate()
+                .map(|(i, &(_, entry_lab))| (i, lab.distance(&entry_lab), entry_lab))
                 .filter(|&(_, d, entry_lab)| {
                     // Dentro de la tolerancia, o sólo más lejos en luz de lo que
                     // `gradient_step` permite ensanchar la banda.
@@ -424,36 +484,50 @@ impl Palette {
                             && lab.lightness_gap(&entry_lab) <= options.gradient_step)
                 })
                 .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(entry, _, _)| entry);
+                .map(|(i, _, _)| i);
 
-            let entry = match near {
-                Some(entry) => entry,
+            let index = match near {
+                Some(i) => i,
                 None => {
                     // Sin candidata y sin poder fundar: sólo pasa si la paleta
                     // impuesta está vacía, y entonces `fixed` es falso.
                     debug_assert!(can_add, "ningún destino para {color:?}");
                     entries.push((color, lab));
-                    color
+                    entries.len() - 1
                 }
             };
-            representative.insert(color, entry);
+            assignment.insert(color, (index as u32, lab));
         }
 
         Palette {
             bits,
-            representative,
+            assignment,
+            entries: entries.iter().map(|&(color, _)| color).collect(),
+            entry_lab: entries.iter().map(|&(_, lab)| lab).collect(),
         }
     }
 
-    /// El representante de un píxel crudo, o `None` si no es visible.
-    fn lookup(&self, px: &[u8], options: &ClusterOptions) -> Option<Rgba> {
+    /// La entrada de un píxel crudo y su color, o `None` si no es visible.
+    fn lookup(&self, px: &[u8], options: &ClusterOptions) -> Option<(u32, Oklab)> {
         if px[3] < options.alpha_threshold {
             return None;
         }
+        Some(self.quantized(px))
+    }
+
+    /// El color de un píxel que ya se sabe visible.
+    ///
+    /// Existe aparte de [`Palette::lookup`] para la regularización, que ya ha
+    /// mirado el alfa —está en el campo de entradas— y sólo quiere el color.
+    fn lab_at(&self, px: &[u8]) -> Oklab {
+        self.quantized(px).1
+    }
+
+    fn quantized(&self, px: &[u8]) -> (u32, Oklab) {
         let quantized = Rgba::new(px[0], px[1], px[2], px[3]).quantize(self.bits);
         // Está siempre: la paleta se construyó sobre estos mismos píxeles, con
         // esta misma cuantización y este mismo umbral de alfa.
-        Some(self.representative[&quantized])
+        self.assignment[&quantized]
     }
 }
 

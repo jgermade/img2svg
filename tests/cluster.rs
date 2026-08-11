@@ -56,8 +56,11 @@ fn imagen(rows: &[&str], paleta: &[(char, Rgba)]) -> RgbaImage {
 /// Las opciones de este fichero, con el filtrado de motas **apagado**: aquí se
 /// prueba el agrupado y no el filtro, y con el umbral por defecto —cuatro
 /// píxeles— casi cualquier región de un dibujo de ejemplo sería una mota.
+/// Las tres etapas que funden, apagadas: son las que gastan la cota de color de
+/// la paleta, y casi todo lo que se afirma aquí es sobre la paleta.
 fn opciones() -> ClusterOptions {
     ClusterOptions {
+        smoothing: 0,
         filter_speckle: 0,
         min_thickness: 0.0,
         ..ClusterOptions::default()
@@ -286,6 +289,42 @@ fn ningun_pixel_se_pinta_mas_lejos_de_la_tolerancia() {
     // Y contando la cuantización, el error sigue siendo pequeño.
     assert!(peor < options.tolerance + 0.03, "peor caso {peor}");
     println!("peor desvío con cuantización incluida: {peor:.4}");
+}
+
+#[test]
+fn la_regularizacion_gasta_la_tolerancia_pero_con_techo() {
+    // El suavizado mueve píxeles por razones de vecindad, así que la cota de
+    // arriba deja de valer tal cual. Lo que no puede hacer es soltarse: el techo
+    // es `smooth::CEILING` veces la tolerancia, y esto lo comprueba sobre la misma
+    // rampa, que es donde hay fronteras de decisión en cada columna.
+    let options = ClusterOptions {
+        smoothing: 4,
+        ..opciones()
+    };
+    let mut img = RgbaImage::new(256, 32);
+    for (x, y, px) in img.enumerate_pixels_mut() {
+        *px = image::Rgba([x as u8, (y * 8) as u8, 255 - x as u8, 255]);
+    }
+    let c = cluster::from_image(&img, &options);
+
+    let techo = options.tolerance * img2svg::smooth::CEILING;
+    let mut peor = 0.0f64;
+    for (i, &label) in c.labels.iter().enumerate() {
+        let px = &img.as_raw()[i * 4..i * 4 + 4];
+        let original = Rgba::new(px[0], px[1], px[2], px[3]);
+        let pintado = c.clusters[label as usize].color;
+        let d =
+            Oklab::from(original.quantize(options.color_precision)).distance(&Oklab::from(pintado));
+        assert!(
+            d <= techo + 1e-9,
+            "el píxel {i} ({original:?}) se pinta {pintado:?}, a {d}, con techo {techo}"
+        );
+        peor = peor.max(d);
+    }
+    // Y de hecho se queda muy por debajo del techo: se paga por unos pocos
+    // píxeles de frontera, no por todos.
+    assert!(peor > options.tolerance, "no ha movido nada: {peor}");
+    println!("peor desvío tras regularizar: {peor:.4} (techo {techo:.4})");
 }
 
 #[test]
