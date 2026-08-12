@@ -1,0 +1,15 @@
+<!--
+  dos discos, fit = spline (1.5), 6 curvas
+  lienzo      72x56
+  regiones    3
+  degradados  0
+  colores     3
+  paths       3
+  subtrazados 4
+  fondo       no
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="56" viewBox="0 0 72 56">
+  <path fill="#f7f7ef" fill-rule="evenodd" d="M41 13c36.03-1.32 26.59 44.74-4 33v1c-36.78 10-39.69-49.56 4-35zM0 0v56h72v-56z"/>
+  <path fill="#3a6bc5" d="M37 46c30.59 11.74 40.03-34.32 4-33v1c-13.53 3.28-17.45 24.86-4 31z"/>
+  <path fill="#c53a3a" d="M41 12c-43.69-14.56-40.78 45-4 35v-2c-13.45-6.14-9.53-27.72 4-31z"/>
+</svg>

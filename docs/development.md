@@ -31,7 +31,7 @@ The page is a Vite + Preact project rooted at [`web/`](../web). The wasm is a
 ```sh
 wasm-pack build --release --target web \
   --out-dir web/pkg --out-name img2svg \
-  -- --no-default-features --features wasm,photo
+  -- --no-default-features --features wasm,illustration
 
 cd web
 npm install
@@ -73,7 +73,7 @@ there are messages, request ids or a debounce timer.
 `--no-default-features` is deliberate: the browser decodes the image, so the Rust
 image codecs are half a megabyte of dead weight in the bundle.
 
-`photo` is in, so the page ships **one** bundle with both modes. Measured, it
+`illustration` is in, so the page ships **one** bundle with both modes. Measured, it
 costs 152 KB → 209 KB raw but only 52 KB → 68 KB brotli, and the rule of thumb
 this was weighed against was written in raw bytes. Seventeen kilobytes over the
 wire does not pay for two `pkg/` directories, a loader that picks between them,
@@ -107,7 +107,7 @@ node scripts/web-smoke.mjs
 ```
 
 Loads `web/pkg/img2svg.js`, hands `init()` the `.wasm` bytes directly — so it
-needs no server and no browser — and calls `convertRgba` / `convertPhoto` on a
+needs no server and no browser — and calls `convertRgba` / `convertIllustration` on a
 synthetic buffer built in the script, the way `tests/golden.rs` does. The wasm
 has no image codecs in it (the browser decodes), so a PNG would be no use here.
 
@@ -132,7 +132,9 @@ It runs in CI, right after the wasm build.
 | `tests/checker.rs`, `grid.rs`, `trace.rs`, `background.rs`, `color.rs`, `palette.rs`, `cluster.rs`, `speckle.rs`, `boundary.rs` | Unit tests per module. |
 | `tests/fit.rs` | The fitting axis, read back out of the emitted `d` attributes rather than from internals — segments and their control points, so curves can be compared as curves. Holds the seam check (every interior segment *and every cubic* is drawn by exactly two faces, identically), the tolerance ceiling for both fitters, and that a digitised circle closes without a kink. |
 | `tests/golden.rs` | Snapshots of the pixel art path over a synthetic ASCII sprite. Input lives in the file, so it runs anywhere. |
-| `tests/photo.rs` | Snapshots of the photo path over a synthetic drawing — a gradient, two flat blocks, a one-pixel line and a few loose dots, one motif per behaviour that was decided by looking at results. |
+| `tests/resample.rs` | The working scale: that one number decides the working canvas whatever the file size, that upscaling is capped, that a flat colour survives the filter unchanged, that a cut-out's edge does not darken (premultiplied alpha), and that the document is still announced at the source's size. |
+| `tests/wobble.rs` | Contour filing: that it costs fewer numbers, that a right angle stays exactly where it was, and that no vertex moves further than the cap — without which this would be a smoothing. |
+| `tests/illustration.rs` | Snapshots of the illustration path over a synthetic drawing — a gradient, two flat blocks, a one-pixel line and a few loose dots, one motif per behaviour that was decided by looking at results. |
 | `tests/corpus.rs` | Snapshots over the real images in `examples/`. |
 
 ### Snapshots

@@ -86,7 +86,7 @@ jobs:
         run: >
           wasm-pack build --release --target web
           --out-dir web/pkg --out-name img2svg
-          -- --no-default-features --features wasm,photo
+          -- --no-default-features --features wasm,illustration
 
       # `web/pkg/img2svg.d.ts` está versionado justo para esto: si lo que
       # acaba de compilar no coincide con él, la API que ve JavaScript ha

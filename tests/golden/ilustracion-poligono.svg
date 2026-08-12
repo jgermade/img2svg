@@ -1,0 +1,20 @@
+<!--
+  dibujo, fit = polygon (0.75)
+  lienzo      64x48
+  regiones    4
+  degradados  1
+  colores     8
+  paths       5
+  subtrazados 7
+  fondo       no
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48" viewBox="0 0 64 48">
+  <defs>
+    <linearGradient id="r0" gradientUnits="userSpaceOnUse" x1="31.026" y1="11.846" x2="30.68" y2="42.149"><stop offset="0" stop-color="#192952"/><stop offset="0.275" stop-color="#293a73"/><stop offset="0.618" stop-color="#314a94"/><stop offset="1" stop-color="#4263c5"/></linearGradient>
+  </defs>
+  <path fill="url(#r0)" fill-rule="evenodd" d="M64 10h-38v10h-20v-5h-6v33h64zM36 26h22v16h-22zM2 23h60v1h-60z"/>
+  <path fill="#101931" d="M26 10h38v-10h-64v15h6v-7h20z"/>
+  <path fill="#299c3a" d="M58 26h-22v16h22z"/>
+  <path fill="#c52929" d="M26 8h-20v12h20z"/>
+  <path fill="#ff00ff" d="M2 23v1h60v-1z"/>
+</svg>

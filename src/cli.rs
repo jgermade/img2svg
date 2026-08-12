@@ -2,12 +2,13 @@
 //!
 //! El subcomando elige la **segmentación** —cómo se pasa de la imagen a un
 //! conjunto de regiones— y los ajustes que no dependen de ella van en un bloque
-//! compartido. `pixelart` detecta la rejilla del dibujo; `photo` agrupa los
-//! colores en una paleta y etiqueta las regiones conexas.
+//! compartido. `pixelart` detecta la rejilla del dibujo; `illustration` agrupa
+//! los colores en una paleta y etiqueta las regiones conexas.
 //!
 //! Sus opciones no se parecen porque no hablan de lo mismo: una tolerancia de
 //! `12` en pixel art es distancia RGB entre dos tonos de una paleta discreta, y
-//! una de `0.045` en foto es distancia en Oklab dentro de un degradado continuo.
+//! una de `0.045` en ilustración es distancia en Oklab dentro de un degradado
+//! continuo.
 //! Mezclarlas en un solo comando con banderas que a veces sirven y a veces no
 //! sería más corto de escribir y peor de usar.
 
@@ -29,8 +30,11 @@ struct Cli {
 enum Command {
     /// Pixel art: detecta la rejilla y une los píxeles del mismo color en paths.
     Pixelart(Pixelart),
-    /// Foto o dibujo sin rejilla: agrupa los colores y traza cada región.
-    Photo(Photo),
+    /// Ilustración: agrupa los colores de la imagen y traza cada región.
+    ///
+    /// El alias `photo` es como se llamaba antes; sigue valiendo.
+    #[command(alias = "photo")]
+    Illustration(Illustration),
 }
 
 /// Ajustes que no dependen de la segmentación.
@@ -49,11 +53,11 @@ struct Common {
 
     /// Cómo se convierte el contorno de una región en datos de path.
     ///
-    /// Por defecto, `pixel` en pixelart y `polygon` en photo, que es lo que
-    /// quiere cada uno: en un sprite la escalera **es** el dibujo y redondearla
-    /// sería estropearlo, mientras que en una foto no hay ninguna escalera que
-    /// preservar —sólo la de la retícula de píxeles— y enderezarla quita entre un
-    /// 23% y un 32% del fichero sin que se note en el dibujo.
+    /// Por defecto, `pixel` en pixelart y `polygon` en illustration, que es lo
+    /// que quiere cada uno: en un sprite la escalera **es** el dibujo y
+    /// redondearla sería estropearlo, mientras que en una ilustración no hay
+    /// ninguna escalera que preservar —sólo la de la retícula de píxeles— y
+    /// enderezarla quita entre un 23% y un 32% del fichero sin que se note.
     ///
     /// No puede ir en `default_value_t` porque no es el mismo para los dos
     /// subcomandos; lo resuelve [`Common::fit`].
@@ -91,33 +95,6 @@ enum FitArg {
     /// Béziers cúbicas, con las esquinas en pico y el resto liso.
     Spline,
 }
-
-/// La tolerancia con la que sale `photo` cuando endereza un contorno.
-///
-/// Es más estrecha que [`Fit::TOLERANCE`] y el motivo es geométrico, no de gusto.
-/// Sobre una retícula de píxeles la tolerancia tiene dos escalones y nada entre
-/// medias: a `0.5` se aplana un peldaño suelto, y a `raíz(2)/2 = 0.707` una
-/// escalera de 45 grados colapsa en su diagonal. Contando anclas en la portada:
-///
-/// | tolerancia | anclas | |
-/// | --- | --- | --- |
-/// | 0,49 | 11.464 | |
-/// | 0,50 | 11.419 | se aplanan los peldaños sueltos |
-/// | 0,70 | 8.997 | |
-/// | **0,71** | **7.704** | **−14,4%: colapsan las diagonales** |
-/// | 0,75 | 7.503 | |
-///
-/// El problema es que **el borde de un círculo pequeño es una sucesión de
-/// escaleras cortas de 45 grados**, así que ese mismo colapso que endereza un
-/// canto largo convierte una lente de gafas en un octógono. Sobre la retícula las
-/// dos cosas son localmente idénticas y ninguna tolerancia las distingue.
-///
-/// Así que por debajo del escalón, y la compresión que se deja ahí se recupera
-/// cuando los contornos dejen de estar clavados a la retícula —ver
-/// `SESSIONS/2026-08-11_12h45.off-the-pixel-lattice.md`—, que es el arreglo de
-/// verdad. En una imagen grande `--fit-tolerance 0.75` sigue siendo buen negocio:
-/// ahí un rasgo mide cientos de píxeles y no hay arco que perder.
-const PHOTO_POLYGON_TOLERANCE: f64 = 0.5;
 
 impl Common {
     /// El ajustador pedido, o el que trae de fábrica la segmentación que llama,
@@ -208,9 +185,28 @@ impl Pixelart {
 }
 
 #[derive(Args)]
-struct Photo {
+struct Illustration {
     #[command(flatten)]
     common: Common,
+
+    /// El rasgo más pequeño que sobrevive, en tantos por mil del lado largo.
+    ///
+    /// Es el mando de simplificar, y decide a qué resolución se segmenta: todas
+    /// las demás constantes van en píxeles absolutos —un área de motas, un
+    /// grosor, una desviación de ajuste—, así que lo que significan depende de
+    /// cuántos píxeles gasta la imagen en un rasgo. Subirlo simplifica; bajarlo
+    /// conserva detalle y engorda el fichero.
+    ///
+    /// Por debajo de lo que la imagen mide, sube de escala, que es lo que
+    /// recupera el borde escrito en el antialias; por encima, baja, que es lo que
+    /// promedia el grano. Con --no-simplify se trabaja sobre la retícula del
+    /// original tal cual.
+    #[arg(long, default_value_t = img2svg::resample::SIMPLIFY)]
+    simplify: f64,
+
+    /// Segmenta sobre la retícula del original, sin elegir escala de trabajo.
+    #[arg(long, conflicts_with = "simplify")]
+    no_simplify: bool,
 
     /// Distancia máxima en Oklab entre un color y el de la región que lo pinta.
     ///
@@ -221,7 +217,7 @@ struct Photo {
 
     /// Bits por canal a los que se recorta el color antes de agrupar.
     ///
-    /// Baja el ruido del último bit, que en una foto son miles de colores
+    /// Baja el ruido del último bit, que en una imagen son miles de colores
     /// distintos que no se ven.
     #[arg(short, long, default_value_t = ClusterOptions::default().color_precision)]
     color_precision: u8,
@@ -235,6 +231,21 @@ struct Photo {
     /// los píxeles del borde dice por dónde corta de verdad, y eso los recoloca.
     #[arg(long)]
     no_subpixel: bool,
+
+    /// Cuánto puede moverse un vértice del contorno para quitarle el temblor de
+    /// la escalera, en píxeles de trabajo.
+    ///
+    /// El contorno sale de recorrer grietas entre píxeles, así que un canto
+    /// oblicuo sale a peldaños, y los de un dibujo real son irregulares: el
+    /// simplificador no puede tirarlos sin salirse de lo que promete, y los
+    /// escribe. Esto los lima moviendo los vértices, con tope y sin tocar las
+    /// esquinas, que se reconocen por el giro a lo largo del contorno.
+    #[arg(long, default_value_t = ClusterOptions::default().relax)]
+    relax: f64,
+
+    /// Deja el contorno tal como sale del trazado, con su temblor de escalera.
+    #[arg(long, conflicts_with = "relax")]
+    no_relax: bool,
 
     /// No fundir en un degradado los grupos de bandas que son una rampa.
     ///
@@ -272,7 +283,7 @@ struct Photo {
     #[arg(long, default_value_t = ClusterOptions::default().filter_speckle)]
     filter_speckle: usize,
 
-    /// Grosor por debajo del cual una región se funde con su vecina.
+    /// Grosor por debajo del cual una región puede fundirse con su vecina.
     ///
     /// No es un filtro de tamaño: existe por las bandas de un píxel de ancho que
     /// aparecen a lo largo de cada frontera de color, que son largas —y por
@@ -280,20 +291,22 @@ struct Photo {
     /// 2*área/perímetro, que ronda 0.5 en una banda por larga que sea y crece
     /// con el lado en un bloque compacto.
     ///
-    /// El valor por defecto, 1, es el grosor justo de un bloque de 2x2, así que
-    /// **se lleva por delante todo lo que mida un píxel de ancho**, incluida una
-    /// línea fina que sí fuese dibujo. Es el precio de quitar los rebordes de
-    /// antialias, y se paga porque en una foto hay muchísimos más rebordes que
-    /// líneas de un píxel. En un dibujo de línea fina, ponerlo a 0.
+    /// Ser delgada no basta para fundirse, porque un trazo de tinta también lo
+    /// es: se funden las delgadas cuyo color es una **mezcla** de sus dos
+    /// vecinas, que es lo que un reborde de antialias es y un trazo no. Así que
+    /// subirlo no se lleva el dibujo por delante; lo que hace es admitir
+    /// rebordes más gordos.
     #[arg(long, default_value_t = ClusterOptions::default().min_thickness)]
     min_thickness: f64,
 
-    /// Ensancha las bandas de un degradado fundiendo por diferencia de luz.
+    /// Funde tonos que sólo se distinguen en luminosidad, dejando el tono donde
+    /// está.
     ///
-    /// Es la herramienta para un cielo liso: funde tonos que sólo se distinguen
-    /// en luminosidad, dejando el tono donde está. En un dibujo con volumen hace
-    /// lo contrario de lo que se quiere, porque aplana el sombreado; y pasado
-    /// ~0.15 las fronteras entre bandas salen moteadas. Por eso viene apagado.
+    /// Viene con un poco puesto, y no por bandear un cielo sino por la tinta: un
+    /// trazo fino nunca llega a tinta plena, así que sale más claro que uno gordo
+    /// y la paleta parte el mismo trazo en dos tonos. Subirlo ensancha las bandas
+    /// de un degradado a propósito —la herramienta para un cielo liso—, pero
+    /// pasado ~0.15 aplana el volumen de un dibujo y motea las fronteras.
     #[arg(long, default_value_t = ClusterOptions::default().gradient_step)]
     gradient_step: f64,
 
@@ -326,12 +339,14 @@ struct Photo {
     remove_background: bool,
 }
 
-impl Photo {
+impl Illustration {
     fn config(&self) -> Config {
         let cluster = ClusterOptions {
+            simplify: Some(if self.no_simplify { 0.0 } else { self.simplify }),
             color_precision: self.color_precision,
             tolerance: self.tolerance,
             subpixel: !self.no_subpixel,
+            relax: if self.no_relax { 0.0 } else { self.relax },
             ramps: !self.no_ramps,
             smoothing: self.smoothing,
             alpha_threshold: self.alpha_threshold,
@@ -348,9 +363,11 @@ impl Photo {
         Config {
             background: self.common.background.clone(),
             // Aquí la escalera es sólo la retícula de píxeles y enderezarla no
-            // cuesta dibujo, pero por debajo del escalón donde empieza a costarlo.
-            // Ver `PHOTO_POLYGON_TOLERANCE`.
-            fit: self.common.fit(FitArg::Polygon, PHOTO_POLYGON_TOLERANCE),
+            // cuesta dibujo. La tolerancia es la de fábrica y no una más estrecha
+            // porque la escala de trabajo lleva el rasgo pequeño a
+            // `resample::FEATURE` píxeles, y ahí los escalones de la retícula
+            // —0,5 y raíz(2)/2— quedan por debajo de la tolerancia y ya no muerden.
+            fit: self.common.fit(FitArg::Polygon, Fit::TOLERANCE),
             ..Config::cluster(cluster)
         }
     }
@@ -360,7 +377,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match &cli.command {
         Command::Pixelart(args) => run_pixelart(args),
-        Command::Photo(args) => run_photo(args),
+        Command::Illustration(args) => run_illustration(args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -399,7 +416,7 @@ fn run_pixelart(args: &Pixelart) -> Result<(), String> {
     Ok(())
 }
 
-fn run_photo(args: &Photo) -> Result<(), String> {
+fn run_illustration(args: &Illustration) -> Result<(), String> {
     let common = &args.common;
     let (out, path) = convert(common, &args.config())?;
     if common.quiet {
@@ -409,7 +426,12 @@ fn run_photo(args: &Photo) -> Result<(), String> {
     report_background(&out);
     // El número de regiones es lo que se mueve al tocar el filtrado de motas, y
     // no se deduce de los paths: un color con varias regiones va en un `<g>`.
-    if let img2svg::Detail::Cluster { regions, ramps } = out.detail {
+    if let img2svg::Detail::Cluster {
+        regions,
+        ramps,
+        scale,
+    } = out.detail
+    {
         // Los degradados sólo se nombran cuando los hay: en un dibujo de colores
         // planos no hay ninguno y la línea no tiene por qué decirlo.
         let con_degradados = match ramps {
@@ -417,9 +439,17 @@ fn run_photo(args: &Photo) -> Result<(), String> {
             1 => ", 1 degradado".to_string(),
             n => format!(", {n} degradados"),
         };
+        // La escala sólo se nombra cuando ha habido reescalado: si se ha
+        // trabajado sobre la retícula del original no hay nada que contar, y el
+        // lienzo ya es el de la imagen.
+        let a_escala = if scale == 1.0 {
+            String::new()
+        } else {
+            format!(" (escala x{scale:.2})")
+        };
         eprintln!(
-            "lienzo {}x{}, {} regiones{}",
-            out.canvas.0, out.canvas.1, regions, con_degradados
+            "lienzo {}x{}{}, {} regiones{}",
+            out.canvas.0, out.canvas.1, a_escala, regions, con_degradados
         );
     }
     report_output(&out, &path);

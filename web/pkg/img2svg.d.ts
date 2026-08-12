@@ -15,8 +15,14 @@ export interface FitOptions {
 
 
 
-/** Opciones de `convertPhoto`. Todas opcionales. */
-export interface PhotoOptions extends FitOptions {
+/** Opciones de `convertIllustration`. Todas opcionales. */
+export interface IllustrationOptions extends FitOptions {
+    /**
+     * El rasgo más pequeño que sobrevive, en tantos por mil del lado largo, que
+     * es lo que decide a qué resolución se segmenta. Si no viene, se elige solo;
+     * `0` trabaja sobre la retícula del original.
+     */
+    simplify?: number;
     /** Bits por canal que se conservan al cuantizar, de 1 a 8. */
     colorPrecision?: number;
     /** Distancia de color por debajo de la cual dos píxeles son el mismo. */
@@ -25,6 +31,11 @@ export interface PhotoOptions extends FitOptions {
     smoothing?: number;
     /** Colocar los vértices donde la imagen dice que está el borde, no en la retícula. */
     subpixel?: boolean;
+    /**
+     * Cuánto puede moverse un vértice, en píxeles, para quitarle al contorno el
+     * temblor de la escalera. `0` lo deja como sale del trazado.
+     */
+    relax?: number;
     /** Fundir en un `<linearGradient>` los grupos de bandas que son una rampa. */
     ramps?: boolean;
     /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
@@ -47,10 +58,10 @@ export interface PhotoOptions extends FitOptions {
      * Aviso de avance, de 0 a 1. Se llama como mucho una vez por cada tanto por
      * ciento.
      *
-     * Sólo lo tiene el camino de foto: es el que puede tardar medio segundo en
-     * una imagen de 4 Mpx. El de pixel art reduce la imagen a la rejilla en el
-     * primer paso y a partir de ahí trabaja sobre unas decenas de píxeles de
-     * lado, así que no hay avance que contar.
+     * Sólo lo tiene el camino de ilustración: es el que puede tardar medio
+     * segundo en una imagen de 4 Mpx. El de pixel art reduce la imagen a la
+     * rejilla en el primer paso y a partir de ahí trabaja sobre unas decenas de
+     * píxeles de lado, así que no hay avance que contar.
      */
     onProgress?: (fraction: number) => void;
 }
@@ -136,14 +147,14 @@ export class Conversion {
 }
 
 /**
- * Resultado de una conversión de foto.
+ * Resultado de una conversión de ilustración.
  *
  * Es un tipo aparte y no unos cuantos `undefined` más en [`Conversion`]: los
  * dos caminos no comparten casi ninguna cifra —no hay rejilla, ni celda, ni
  * damero, y sí un recuento de regiones— y así el `.d.ts` **gana** un tipo en
  * vez de que el que ya consume la página se llene de campos opcionales.
  */
-export class PhotoConversion {
+export class IllustrationConversion {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
@@ -172,19 +183,25 @@ export class PhotoConversion {
      * de motas, y la que dice si el SVG se puede abrir en un editor.
      */
     readonly regions: number;
+    /**
+     * Escala a la que se ha segmentado, respecto a la imagen que llegó. Es lo
+     * que la página tiene que enseñar cuando `simplify` va en automático: es la
+     * única forma de ver qué ha elegido.
+     */
+    readonly scale: number;
     readonly subpaths: number;
     readonly svg: string;
 }
 
 /**
- * Convierte un búfer RGBA por el camino de foto.
+ * Convierte un búfer RGBA por el camino de ilustración.
  *
  * Va aparte de [`convert_rgba`] en vez de mirar una clave `mode` dentro de las
  * opciones porque son dos juegos de ajustes que no se solapan: una función por
  * segmentación deja que cada una lea sólo lo suyo, y que el `.d.ts` diga cuál
  * devuelve qué.
  */
-export function convertPhoto(width: number, height: number, data: Uint8Array, options: PhotoOptions): PhotoConversion;
+export function convertIllustration(width: number, height: number, data: Uint8Array, options: IllustrationOptions): IllustrationConversion;
 
 /**
  * Convierte un búfer RGBA (el que devuelve `ctx.getImageData()`) en SVG.
@@ -196,7 +213,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_conversion_free: (a: number, b: number) => void;
-    readonly __wbg_photoconversion_free: (a: number, b: number) => void;
+    readonly __wbg_illustrationconversion_free: (a: number, b: number) => void;
     readonly conversion_background: (a: number) => [number, number];
     readonly conversion_cellHeight: (a: number) => number;
     readonly conversion_cellWidth: (a: number) => number;
@@ -210,17 +227,18 @@ export interface InitOutput {
     readonly conversion_paths: (a: number) => number;
     readonly conversion_subpaths: (a: number) => number;
     readonly conversion_svg: (a: number) => [number, number];
-    readonly convertPhoto: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
+    readonly convertIllustration: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
     readonly convertRgba: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
-    readonly photoconversion_background: (a: number) => [number, number];
-    readonly photoconversion_ramps: (a: number) => number;
-    readonly photoconversion_regions: (a: number) => number;
-    readonly photoconversion_svg: (a: number) => [number, number];
-    readonly photoconversion_canvasHeight: (a: number) => number;
-    readonly photoconversion_canvasWidth: (a: number) => number;
-    readonly photoconversion_colors: (a: number) => number;
-    readonly photoconversion_paths: (a: number) => number;
-    readonly photoconversion_subpaths: (a: number) => number;
+    readonly illustrationconversion_background: (a: number) => [number, number];
+    readonly illustrationconversion_ramps: (a: number) => number;
+    readonly illustrationconversion_regions: (a: number) => number;
+    readonly illustrationconversion_scale: (a: number) => number;
+    readonly illustrationconversion_svg: (a: number) => [number, number];
+    readonly illustrationconversion_canvasHeight: (a: number) => number;
+    readonly illustrationconversion_canvasWidth: (a: number) => number;
+    readonly illustrationconversion_colors: (a: number) => number;
+    readonly illustrationconversion_paths: (a: number) => number;
+    readonly illustrationconversion_subpaths: (a: number) => number;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

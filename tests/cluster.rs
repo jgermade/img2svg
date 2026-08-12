@@ -1,5 +1,5 @@
 //! Segmentación por clustering: paleta, componentes conexas y orden de salida.
-#![cfg(feature = "photo")]
+#![cfg(feature = "illustration")]
 
 use std::collections::BTreeMap;
 
@@ -65,6 +65,10 @@ fn opciones() -> ClusterOptions {
         smoothing: 0,
         filter_speckle: 0,
         min_thickness: 0.0,
+        // La cota estrecha es la de la paleta a solas, y esto funde por diferencia
+        // de luz **por encima** de la tolerancia a propósito: viene puesto de
+        // fábrica por la tinta partida, y aquí se apaga como las otras tres.
+        gradient_step: 0.0,
         ..ClusterOptions::default()
     }
 }

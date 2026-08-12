@@ -5,8 +5,8 @@
 Turns images into SVG. The **pixel art** mode detects the drawing's grid and
 merges every contiguous block of same-coloured pixels into a single `<path>`,
 tracing its minimal outline, holes included — rather than emitting one rectangle
-per pixel. The **photo** mode instead groups the colours into a palette and
-traces the connected regions of each entry, for images that sit on no grid.
+per pixel. The **illustration** mode instead groups the colours into a palette
+and traces the connected regions of each entry, for images that sit on no grid.
 
 Three ways to use it: **web**, **CLI** and **library**.
 
@@ -31,18 +31,34 @@ rejilla 80x126 (celda 20.45x20.36, offset 18.09,0.14)
 ```
 
 The subcommand picks how the image is read. `pixelart` assumes a regular grid;
-`photo` groups the colours into a palette and traces the connected regions of
-each entry, which is what an image without a grid needs:
+`illustration` reinterprets the image as a drawing: it picks a **working scale**,
+groups the colours into a palette, traces the connected regions of each entry and
+files the staircase off their contours (`photo` is a legacy alias of it):
 
 ```sh
-./target/release/img2svg photo label.png --remove-background
+./target/release/img2svg illustration drawing.png --remove-background
 ```
 
 ```
-fondo #ffffff retirado y lienzo recortado
-lienzo 662x1079, 1099 regiones
-37 colores, 1099 paths, 1521 subtrazados -> label.svg (107.6 KB)
+lienzo 382x600 (escala x0.23), 321 regiones
+16 colores, 321 paths, 1145 subtrazados -> drawing.svg (77.8 KB)
 ```
+
+The working scale is the first thing this mode decides and the one knob worth
+knowing. Every other constant in it is an absolute pixel count — a speck area, a
+thickness, a fit deviation — so what they mean depends on how many pixels the
+image spends on a feature, and no two images agree: a 300 px album cover spends
+two pixels on an ink stroke, while a 1800×2823 airbrush scan spends two hundred on
+a feature and two on its grain. So `--simplify` asks for the smallest feature that
+should survive, as a fraction of the long side, and the image is resampled until
+that feature is three pixels across. A small drawing goes up, which recovers the
+edge the antialiasing wrote inside the pixel; a big scan comes down, which is what
+averages the grain away. Measured on those two images, everything else unchanged:
+
+| | before | now |
+| --- | --- | --- |
+| `cover.jpg`, 300×300 | 20 colours, 501 paths, 77 KB | **16, 450, 84 KB**, and the strokes are whole |
+| `Sonic1.png`, 1800×2823 | 21 colours, 6,895 paths, 1,870 KB | **19, 137, 35 KB** |
 
 `--fit` is shared by both, because how a contour becomes path data is a separate
 decision from how the image becomes regions. `pixel` writes the staircase of
@@ -50,21 +66,21 @@ pixel edges literally; `polygon` straightens it into segments, which takes 12–
 off the file depending on the tolerance; `spline` fits cubic Béziers, keeping the
 corners sharp. The default differs by subcommand, because the two disagree about
 what a staircase is: in a sprite it **is** the drawing, so `pixelart` writes it
-literally, while in a photo it is only the pixel grid showing through, so `photo`
-straightens it.
+literally, while off the grid it is only the pixel lattice showing through, so
+`illustration` straightens it.
 
 ```sh
-./target/release/img2svg photo label.png --fit polygon
-./target/release/img2svg photo label.png --fit spline
+./target/release/img2svg illustration label.png --fit polygon
+./target/release/img2svg illustration label.png --fit spline
 ```
 
 Pick `spline` for an outline that stays smooth however far you zoom, not for a
 smaller file: at the same tolerance it comes out 10–25% *bigger* than `polygon`,
 because a cubic costs six numbers where a line costs two. It also starts at a
-higher tolerance (1.5 against 0.75) — see [docs/curves.md](docs/curves.md) for
+higher tolerance (1.5 against 0.75) — see [docs/illustration.md](docs/illustration.md) for
 why, and for the measurements.
 
-In `photo`, a smooth ramp does not fit in a palette — a region has one colour and
+In `illustration`, a smooth ramp does not fit in a palette — a region has one colour and
 that is all — so it arrives as a stack of flat bands. Where one linear gradient
 reproduces a whole group of them, they are merged into a single shape with a
 `<linearGradient>`: on a grainy sky that is 121 shapes and 70.6 KB down to 3 and
@@ -94,7 +110,7 @@ the cargo features.
 | [docs/cli.md](docs/cli.md) | Every subcommand and option. |
 | [docs/pixelart.md](docs/pixelart.md) | How grid detection, checkerboard removal and tracing work, and the shape of the SVG they produce. |
 | [docs/library.md](docs/library.md) | Using it as a crate: entry points, `Config`, `Conversion`, cargo features. |
-| [docs/curves.md](docs/curves.md) | The photo mode: how its segmentation works, and the curve fitting still to come. |
+| [docs/illustration.md](docs/illustration.md) | The illustration mode: how its segmentation works, and the curve fitting still to come. |
 | [docs/development.md](docs/development.md) | Building, the wasm package, tests and CI. |
 
 Source comments and program output are in Spanish.

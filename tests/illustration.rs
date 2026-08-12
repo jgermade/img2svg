@@ -1,8 +1,8 @@
-//! Instantáneas del camino de foto, sobre una imagen sintética.
+//! Instantáneas del camino de ilustración, sobre una imagen sintética.
 //!
 //! Son a la segmentación por clustering lo que `golden.rs` a la de rejilla: la
 //! entrada cabe en el fichero, corre en cualquier clon y va a CI. El corpus no
-//! sirve aquí —no está versionado— y además una foto real es mal fixture para
+//! sirve aquí —no está versionado— y además una imagen real es mal fixture para
 //! esto: lo que hay que fijar son los comportamientos que se decidieron mirando
 //! resultados, y cada uno quiere un motivo que lo aísle.
 //!
@@ -16,7 +16,7 @@
 //!   si eso está bien;
 //! - unos **puntos sueltos**, que es la mota clásica, la que sí quita el área.
 
-#![cfg(feature = "photo")]
+#![cfg(feature = "illustration")]
 
 mod common;
 
@@ -86,6 +86,21 @@ fn paint(margin: usize) -> (u32, u32, Vec<u8>) {
     (cw as u32, ch as u32, buf)
 }
 
+/// Las opciones de partida de estas instantáneas: las de fábrica pero **sobre la
+/// retícula del dibujo**.
+///
+/// Que `simplify` vaya apagado no es comodidad de fixture, es lo que hace que
+/// estos tests digan algo: el dibujo lleva una línea de un píxel y cuatro puntos
+/// sueltos colocados a mano para aislar cada comportamiento, y reescalarlo antes
+/// de segmentar mediría el reescalado y no la etapa que toca. La escala de trabajo
+/// tiene su propio fichero, `tests/resample.rs`, y su propia instantánea aquí.
+fn en_la_reticula() -> ClusterOptions {
+    ClusterOptions {
+        simplify: Some(0.0),
+        ..ClusterOptions::default()
+    }
+}
+
 /// Convierte por la vía del búfer crudo, que es la que usa la página.
 fn convert(margin: usize, options: ClusterOptions) -> Conversion {
     convert_con(margin, options, Fit::Pixel)
@@ -104,32 +119,63 @@ fn convert_con(margin: usize, options: ClusterOptions, fit: Fit) -> Conversion {
 fn regions(out: &Conversion) -> usize {
     match out.detail {
         Detail::Cluster { regions, .. } => regions,
-        _ => panic!("una conversión de foto debe traer detalle de clustering"),
+        _ => panic!("una conversión de ilustración debe traer detalle de clustering"),
+    }
+}
+
+/// Cuántos `<path>` se pintan de un color. Es lo que distingue «la línea fina
+/// sobrevivió» de «sobrevivieron la línea y los puntos», que comparten color.
+fn paths_con(out: &Conversion, hex: &str) -> usize {
+    let fill = format!("fill=\"{hex}\"");
+    match out.svg.split(&fill).count() - 1 {
+        // Un `<g fill>` con varios paths dentro: el color sale una vez y hay que
+        // contar los paths del grupo.
+        1 => {
+            let desde = out.svg.find(&fill).unwrap();
+            let hasta = out.svg[desde..].find("</g>").map(|n| desde + n);
+            let bloque = &out.svg[desde..hasta.unwrap_or(out.svg.len())];
+            bloque.matches("<path").count().max(1)
+        }
+        n => n,
     }
 }
 
 fn ramps(out: &Conversion) -> usize {
     match out.detail {
         Detail::Cluster { ramps, .. } => ramps,
-        _ => panic!("una conversión de foto debe traer detalle de clustering"),
+        _ => panic!("una conversión de ilustración debe traer detalle de clustering"),
     }
 }
 
 /// Con las opciones por defecto: la rampa sale a bandas, los bloques planos
-/// enteros, y el detalle de un píxel —línea y puntos— no sobrevive.
+/// enteros, **la línea fina sobrevive y las motas no**.
+///
+/// La rampa sale como un degradado **más una banda plana**, y eso es la costura
+/// entre dos ajustes que tiran en sentidos opuestos: `gradient_step` viene puesto
+/// por la tinta partida y ensancha las bandas, lo que agranda el salto entre
+/// ellas, y un salto grande es justo lo que [`img2svg::ramp`] rechaza. En una
+/// rampa real —un cielo con grano— no llega a pasar; en cinco bandas sobre 48
+/// píxeles, sí. Queda escrito aquí porque es el precio, y se ve en la instantánea.
+///
+/// Esa última pareja es el criterio de [`img2svg::speckle`] puesto a prueba con
+/// las dos cosas que miden lo mismo. La línea es de un píxel de ancho, así que el
+/// grosor la propone; su magenta no se parece a ninguna mezcla de las bandas que
+/// tiene a los dos lados, así que se queda. Los cuatro puntos sueltos miden un
+/// píxel de área y se van por área, que no pregunta nada del color.
 #[test]
 fn por_defecto() {
-    let out = convert(0, ClusterOptions::default());
+    let out = convert(0, en_la_reticula());
 
     assert_eq!(out.canvas, (W, H), "sin quitar el fondo no se recorta");
     assert!(
         out.svg.contains(ROJO) && out.svg.contains(VERDE),
         "los dos bloques planos deben salir enteros y con su color"
     );
-    assert!(
-        !out.svg.contains(MAGENTA),
-        "con min_thickness = 1 no queda nada de un píxel de ancho, \
-         ni la línea ni los puntos"
+    assert_eq!(
+        paths_con(&out, MAGENTA),
+        1,
+        "la línea fina tiene que llegar entera y sola: es tinta, no mezcla, \
+         y los cuatro puntos se van por área"
     );
     assert!(
         out.colors > 5,
@@ -137,7 +183,11 @@ fn por_defecto() {
         out.colors
     );
 
-    check("foto-por-defecto", &out, "dibujo, opciones por defecto");
+    check(
+        "ilustracion-por-defecto",
+        &out,
+        "dibujo, opciones por defecto",
+    );
 }
 
 /// Sin filtrar, la línea de un píxel y los puntos siguen ahí. Es el contraste
@@ -145,13 +195,13 @@ fn por_defecto() {
 /// hace por el filtro y no porque la paleta se lo haya comido.
 #[test]
 fn sin_filtrar_sobrevive_el_detalle_fino() {
-    let base = convert(0, ClusterOptions::default());
+    let base = convert(0, en_la_reticula());
     let out = convert(
         0,
         ClusterOptions {
             filter_speckle: 0,
             min_thickness: 0.0,
-            ..ClusterOptions::default()
+            ..en_la_reticula()
         },
     );
 
@@ -167,7 +217,7 @@ fn sin_filtrar_sobrevive_el_detalle_fino() {
     );
 
     check(
-        "foto-sin-filtrar",
+        "ilustracion-sin-filtrar",
         &out,
         "dibujo, filter_speckle = 0, min_thickness = 0",
     );
@@ -178,12 +228,12 @@ fn sin_filtrar_sobrevive_el_detalle_fino() {
 /// él: fundir dos bandas vecinas puede partir en dos lo que las rodeaba.
 #[test]
 fn el_escalon_ensancha_las_bandas() {
-    let base = convert(0, ClusterOptions::default());
+    let base = convert(0, en_la_reticula());
     let out = convert(
         0,
         ClusterOptions {
             gradient_step: 0.15,
-            ..ClusterOptions::default()
+            ..en_la_reticula()
         },
     );
 
@@ -198,10 +248,14 @@ fn el_escalon_ensancha_las_bandas() {
         "y los bloques planos no se tocan: sólo se funde a lo largo de la luz"
     );
 
-    check("foto-gradiente", &out, "dibujo, gradient_step = 0.15");
+    check(
+        "ilustracion-gradiente",
+        &out,
+        "dibujo, gradient_step = 0.15",
+    );
 }
 
-/// El fondo del camino de foto es lo que toca el borde de la imagen. Con el
+/// El fondo del camino de ilustración es lo que toca el borde de la imagen. Con el
 /// dibujo sobre un margen liso, quitarlo devuelve el lienzo al tamaño del dibujo.
 #[test]
 fn fondo_retirado_y_recortado() {
@@ -209,7 +263,7 @@ fn fondo_retirado_y_recortado() {
         6,
         ClusterOptions {
             remove_background: true,
-            ..ClusterOptions::default()
+            ..en_la_reticula()
         },
     );
 
@@ -222,7 +276,7 @@ fn fondo_retirado_y_recortado() {
     );
 
     check(
-        "foto-fondo-retirado",
+        "ilustracion-fondo-retirado",
         &out,
         "dibujo con margen de 6 px, remove_background",
     );
@@ -244,7 +298,7 @@ fn el_poligono_dibuja_lo_mismo_con_menos_datos() {
     // `el_subpixel_cuesta_bytes_y_compra_sitio`.
     let sobre_reticula = ClusterOptions {
         subpixel: false,
-        ..ClusterOptions::default()
+        ..en_la_reticula()
     };
     let escalera = convert(0, sobre_reticula.clone());
     let out = convert_con(0, sobre_reticula, Fit::polygon());
@@ -265,7 +319,7 @@ fn el_poligono_dibuja_lo_mismo_con_menos_datos() {
         "con oblicuas el suavizado tiene que estar puesto"
     );
 
-    check("foto-poligono", &out, "dibujo, fit = polygon (0.75)");
+    check("ilustracion-poligono", &out, "dibujo, fit = polygon (0.75)");
 }
 
 /// El compromiso del contorno subpíxel, fijado para que no se olvide.
@@ -291,7 +345,7 @@ fn el_poligono_dibuja_lo_mismo_con_menos_datos() {
 fn el_subpixel_cuesta_bytes_y_compra_sitio() {
     let sin_degradados = ClusterOptions {
         ramps: false,
-        ..ClusterOptions::default()
+        ..en_la_reticula()
     };
     let con = convert_con(0, sin_degradados.clone(), Fit::polygon());
     let sin = convert_con(
@@ -362,7 +416,7 @@ fn las_curvas_se_quedan_donde_estan() {
 
     let config = Config {
         fit: Fit::spline(),
-        ..Config::cluster(ClusterOptions::default())
+        ..Config::cluster(en_la_reticula())
     };
     let out = img2svg::convert_rgba(w as u32, h as u32, &buf, &config)
         .expect("la conversión no debe fallar");
@@ -387,7 +441,7 @@ fn las_curvas_se_quedan_donde_estan() {
     );
 
     check(
-        "foto-curvas",
+        "ilustracion-curvas",
         &out,
         &format!("dos discos, fit = spline (1.5), {curvas} curvas"),
     );
@@ -406,10 +460,10 @@ fn la_rampa_sale_de_una_pieza() {
         0,
         ClusterOptions {
             ramps: false,
-            ..ClusterOptions::default()
+            ..en_la_reticula()
         },
     );
-    let out = convert(0, ClusterOptions::default());
+    let out = convert(0, en_la_reticula());
 
     assert_eq!(ramps(&out), 1, "una rampa, un degradado");
     assert_eq!(ramps(&plano), 0, "y sin la opción, ninguno");
@@ -451,13 +505,8 @@ fn una_bandera_no_es_un_degradado() {
             buf.extend_from_slice(&franjas[y * franjas.len() / h]);
         }
     }
-    let out = img2svg::convert_rgba(
-        w as u32,
-        h as u32,
-        &buf,
-        &Config::cluster(ClusterOptions::default()),
-    )
-    .expect("la conversión no debe fallar");
+    let out = img2svg::convert_rgba(w as u32, h as u32, &buf, &Config::cluster(en_la_reticula()))
+        .expect("la conversión no debe fallar");
 
     assert_eq!(ramps(&out), 0, "cuatro franjas planas no son una rampa");
     assert!(!out.svg.contains("<linearGradient"));
@@ -467,7 +516,7 @@ fn una_bandera_no_es_un_degradado() {
 /// con el caso anterior.
 #[test]
 fn fondo_conservado() {
-    let out = convert(6, ClusterOptions::default());
+    let out = convert(6, en_la_reticula());
 
     assert!(out.background.is_none());
     assert_eq!(out.canvas, (W + 12, H + 12), "el lienzo entero");

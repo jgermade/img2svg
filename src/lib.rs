@@ -21,26 +21,30 @@
 //! ```
 
 pub mod background;
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub mod boundary;
 pub mod checker;
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub mod cluster;
 pub mod color;
 pub mod fit;
 pub mod grid;
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub mod ramp;
 pub mod region;
+#[cfg(feature = "illustration")]
+pub mod resample;
 pub mod segment;
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub mod smooth;
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub mod speckle;
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub mod subpixel;
 pub mod svg;
 pub mod trace;
+#[cfg(feature = "illustration")]
+pub mod wobble;
 
 #[cfg(feature = "wasm")]
 mod wasm;
@@ -54,7 +58,7 @@ use image::RgbaImage;
 use crate::color::Rgba;
 use crate::grid::{Axis, PixelMap};
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub use crate::cluster::ClusterOptions;
 pub use crate::fit::Fit;
 pub use crate::segment::Grouping;
@@ -83,7 +87,7 @@ impl Config {
     }
 
     /// Configuración de foto con el ajuste por defecto.
-    #[cfg(feature = "photo")]
+    #[cfg(feature = "illustration")]
     pub fn cluster(options: ClusterOptions) -> Self {
         Config {
             segmentation: Segmentation::Cluster(options),
@@ -96,7 +100,7 @@ impl Config {
     pub fn grid_options(&self) -> Option<&GridOptions> {
         match &self.segmentation {
             Segmentation::Grid(options) => Some(options),
-            #[cfg(feature = "photo")]
+            #[cfg(feature = "illustration")]
             Segmentation::Cluster(_) => None,
         }
     }
@@ -104,7 +108,7 @@ impl Config {
     pub fn grid_options_mut(&mut self) -> Option<&mut GridOptions> {
         match &mut self.segmentation {
             Segmentation::Grid(options) => Some(options),
-            #[cfg(feature = "photo")]
+            #[cfg(feature = "illustration")]
             Segmentation::Cluster(_) => None,
         }
     }
@@ -117,7 +121,7 @@ pub enum Segmentation {
     Grid(GridOptions),
     /// Foto: se agrupan los colores en una paleta y se etiquetan las regiones
     /// conexas de cada entrada. Ver [`cluster`].
-    #[cfg(feature = "photo")]
+    #[cfg(feature = "illustration")]
     Cluster(ClusterOptions),
 }
 
@@ -207,7 +211,7 @@ pub enum Detail {
         /// El damero de transparencia encontrado, si lo había.
         checkerboard: Option<checker::Checkerboard>,
     },
-    #[cfg(feature = "photo")]
+    #[cfg(feature = "illustration")]
     Cluster {
         /// Regiones conexas emitidas. Es el número que hay que mirar al tocar el
         /// filtrado de motas: los colores casi no se mueven y esto sí.
@@ -215,6 +219,9 @@ pub enum Detail {
         /// Degradados encontrados. Cada uno se llevó por delante un grupo de
         /// bandas, así que no se suma a `regions`: se lo resta.
         ramps: usize,
+        /// Escala a la que se ha segmentado, respecto a la imagen que llegó.
+        /// `1.0` es sobre su propia retícula. Ver [`resample`].
+        scale: f64,
     },
 }
 
@@ -226,7 +233,7 @@ impl Conversion {
     pub fn cell(&self) -> Option<(f64, f64)> {
         match self.detail {
             Detail::Grid { cell, .. } => Some(cell),
-            #[cfg(feature = "photo")]
+            #[cfg(feature = "illustration")]
             Detail::Cluster { .. } => None,
         }
     }
@@ -234,7 +241,7 @@ impl Conversion {
     pub fn offset(&self) -> Option<(f64, f64)> {
         match self.detail {
             Detail::Grid { offset, .. } => Some(offset),
-            #[cfg(feature = "photo")]
+            #[cfg(feature = "illustration")]
             Detail::Cluster { .. } => None,
         }
     }
@@ -242,7 +249,7 @@ impl Conversion {
     pub fn checkerboard(&self) -> Option<checker::Checkerboard> {
         match self.detail {
             Detail::Grid { checkerboard, .. } => checkerboard,
-            #[cfg(feature = "photo")]
+            #[cfg(feature = "illustration")]
             Detail::Cluster { .. } => None,
         }
     }
@@ -453,7 +460,7 @@ pub fn convert_image_with(
         // decenas de píxeles de lado. Lo que tarda es una décima de segundo, y
         // trocearla sería inventarse un detalle que no está.
         Segmentation::Grid(options) => convert_grid(img, options, config),
-        #[cfg(feature = "photo")]
+        #[cfg(feature = "illustration")]
         Segmentation::Cluster(options) => Ok(convert_cluster(img, options, config, progress)),
     };
     progress.finish();
@@ -506,6 +513,7 @@ fn convert_grid(
         &regions,
         &svg::Options {
             pixel_size,
+            display: None,
             background: config.background.clone(),
             fit: config.fit,
         },
@@ -532,19 +540,33 @@ fn convert_grid(
 /// sólo se encadenan y se rellena el resultado. Nada del camino de rejilla —el
 /// damero, la celda, el `pixel_size` que sigue a la escala detectada— aparece,
 /// que es justo lo que quiere decir que sean dos ejes y no dos programas.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn convert_cluster(
     img: &RgbaImage,
     options: &ClusterOptions,
     config: &Config,
     progress: &mut Progress,
 ) -> Conversion {
+    // La escala de trabajo va **primero**, antes de que nadie mire un píxel: todo
+    // lo que viene después está en píxeles absolutos, y lo que esos píxeles miden
+    // se decide aquí. Ver [`resample`].
+    let (sw, sh) = (img.width() as usize, img.height() as usize);
+    let simplify = options.simplify.unwrap_or(resample::SIMPLIFY);
+    let working = resample::working_size(sw, sh, simplify);
+    let scaled = working.map(|(tw, th)| resample::resize(img, tw, th));
+    let img = scaled.as_ref().unwrap_or(img);
+    let scale = img.width() as f64 / sw as f64;
+
     let clustering = cluster::from_image_with(img, options, progress);
     progress.stage(Stage::Boundaries);
     let mut regions = boundary::from_clustering(&clustering);
     if options.subpixel {
         subpixel::place(&mut regions, &clustering, img);
     }
+    // Después del subpíxel, porque relaja los vértices **ya colocados**: los dos
+    // dicen dónde está de verdad el borde, y el orden natural es colocar y luego
+    // limar. Y antes de los degradados, que sólo eligen qué tramos se dibujan.
+    wobble::relax(&mut regions, options.relax);
     if options.ramps {
         // Con los tramos ya colocados, porque fundir un grupo sólo elige cuáles se
         // dibujan y no toca ninguno.
@@ -553,12 +575,19 @@ fn convert_cluster(
     }
     progress.stage(Stage::Document);
 
-    // Una unidad del `viewBox` es un píxel de la imagen, así que el SVG sale a
-    // tamaño natural. En rejilla hay una escala que recuperar y aquí no.
+    // Una unidad del `viewBox` es un píxel **de trabajo**, así que las
+    // coordenadas salen tal como se han trazado y no reescaladas una a una; el
+    // documento se anuncia al tamaño de la imagen que llegó. Si el fondo se
+    // retiró, el lienzo viene recortado y el anuncio se recorta con él.
+    let display = (scale != 1.0).then(|| {
+        let back = |v: usize| ((v as f64 / scale).round() as usize).max(1);
+        (back(regions.width), back(regions.height))
+    });
     let out = svg::render(
         &regions,
         &svg::Options {
             pixel_size: 1,
+            display,
             background: config.background.clone(),
             fit: config.fit,
         },
@@ -574,6 +603,7 @@ fn convert_cluster(
         detail: Detail::Cluster {
             regions: regions.regions.len(),
             ramps: regions.ramps.len(),
+            scale,
         },
     }
 }

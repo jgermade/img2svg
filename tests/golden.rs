@@ -206,7 +206,7 @@ fn fondo_conservado() {
 }
 
 /// Los defaults del camino de pixel art no se mueven cuando `Config` se parta en
-/// `Segmentation` / `Fit`: las necesidades del modo foto (tolerancia mucho más
+/// `Segmentation` / `Fit`: las necesidades del modo ilustración (tolerancia mucho más
 /// alta) no deben arrastrarlos.
 #[test]
 fn los_defaults_no_derivan() {

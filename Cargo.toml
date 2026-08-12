@@ -19,16 +19,19 @@ required-features = ["cli"]
 
 [features]
 default = ["cli"]
-cli = ["dep:clap", "formats", "photo"]
+cli = ["dep:clap", "formats", "illustration"]
 # Decodificadores de imagen. La build web no los necesita: decodifica el
 # navegador y le pasa el RGBA crudo, lo que ahorra medio mega de wasm.
 formats = ["image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp"]
-# Imágenes que no son pixel art: segmentación por clustering y ajuste por
-# curvas. Va aparte para que se pueda compilar un wasm de sólo pixel art —quien
-# entra a convertir un sprite no tiene por qué descargar el código de fotos—, y
-# se declara ahora, con lo poco que hay, porque separarlo después obliga a
-# repartir módulos ya escritos.
-photo = []
+# Imágenes que no están sobre una rejilla: segmentación por clustering y ajuste
+# por curvas. Va aparte para que se pueda compilar un wasm de sólo pixel art
+# —quien entra a convertir un sprite no tiene por qué descargar el resto—, y se
+# declara ahora, con lo poco que hay, porque separarlo después obliga a repartir
+# módulos ya escritos.
+illustration = []
+# Se llamaba `photo` cuando el modo se llamaba así. Sigue valiendo, porque una
+# feature de cargo es API pública y quitarla rompe a quien la nombre.
+photo = ["illustration"]
 wasm = ["dep:wasm-bindgen", "dep:js-sys"]
 
 [dependencies]

@@ -1,5 +1,5 @@
 //! Extracción de fronteras: grietas, cadenas compartidas y anillos.
-#![cfg(feature = "photo")]
+#![cfg(feature = "illustration")]
 
 use std::collections::HashSet;
 
@@ -344,6 +344,7 @@ fn el_documento_sale_valido() {
         &r,
         &svg::Options {
             pixel_size: 8,
+            display: None,
             background: None,
             fit: Fit::Pixel,
         },

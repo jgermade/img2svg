@@ -12,6 +12,13 @@ pub struct Options {
     /// Tamaño de render de cada píxel lógico. El `viewBox` va siempre en píxeles
     /// del dibujo (1 unidad = 1 píxel); esto sólo fija `width`/`height`.
     pub pixel_size: u32,
+    /// `width`/`height` del documento, cuando no son el lienzo por `pixel_size`.
+    ///
+    /// Lo usa la escala de trabajo: ahí el lienzo está en píxeles de trabajo —una
+    /// unidad del `viewBox` es uno de ellos, que es lo que hace que las
+    /// coordenadas salgan tal como se trazaron— y el documento se anuncia al
+    /// tamaño de la imagen que llegó, que es el que espera quien la trajo.
+    pub display: Option<(usize, usize)>,
     /// Color de fondo opcional (se emite como rectángulo bajo los paths).
     pub background: Option<String>,
     pub fit: Fit,
@@ -158,11 +165,12 @@ x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">{stops}</linearGradient>\n",
         " shape-rendering=\"crispEdges\""
     };
 
+    let (dw, dh) = opts
+        .display
+        .map_or((w * scale, h * scale), |(dw, dh)| (dw as i64, dh as i64));
     let svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" \
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{dw}\" height=\"{dh}\" \
 viewBox=\"0 0 {w} {h}\"{rendering}>\n{body}</svg>\n",
-        w * scale,
-        h * scale
     );
 
     Output {

@@ -43,16 +43,18 @@
 //! | etapa | qué puede empeorar el color de un píxel |
 //! | --- | --- |
 //! | `min_color_share` | hasta [`SNAP_CEILING`] veces la tolerancia |
+//! | `gradient_step` | lo que diga, y sólo a lo largo del eje de la luz |
 //! | [`crate::smooth`] | hasta [`crate::smooth::CEILING`] veces la tolerancia, o hasta donde ya estuviera; y sólo a un color que ya se pintaba pegado a él |
 //! | [`crate::speckle`] | sin cota: una mota se va con su vecina, sea del color que sea |
 //!
-//! Las dos primeras componen sin aflojarse: `4x` sigue siendo la cota con las dos
-//! puestas, porque el suavizado nunca empeora un píxel más allá de donde ya
-//! estaba. Así que **con los valores por defecto ningún píxel se pinta a más de
-//! `SNAP_CEILING * tolerance` de su color**, y apagando las tres —
-//! `min_color_share: 0`, `smoothing: 0`, `filter_speckle: 0`, `min_thickness: 0`—
-//! vale la cota estrecha tal cual está escrita arriba. `tests/cluster.rs`
-//! comprueba las dos.
+//! `min_color_share` y el suavizado componen sin aflojarse: `4x` sigue siendo la
+//! cota con los dos puestos, porque el suavizado nunca empeora un píxel más allá
+//! de donde ya estaba. Así que **con los valores por defecto ningún píxel se pinta
+//! a más de `SNAP_CEILING * tolerance` de su color en tono**, más lo que
+//! `gradient_step` permita **en luz**, que es un eje aparte y por eso se dice
+//! aparte. Apagando las cuatro —`min_color_share: 0`, `smoothing: 0`,
+//! `filter_speckle: 0`, `min_thickness: 0`, `gradient_step: 0`— vale la cota
+//! estrecha tal cual está escrita arriba. `tests/cluster.rs` comprueba las dos.
 //!
 //! Fuera de aquí queda una etapa más que también gasta: [`crate::ramp`] añade
 //! hasta [`crate::ramp::CEILING`] tolerancias **encima** de lo que la región ya
@@ -116,6 +118,13 @@ pub const SNAP_CEILING: f64 = 4.0;
 /// interpretaciones distintas de qué es la imagen.
 #[derive(Clone, Debug)]
 pub struct ClusterOptions {
+    /// El rasgo más pequeño que sobrevive, en tantos por mil del lado largo.
+    /// `None` usa [`crate::resample::SIMPLIFY`] y `Some(0.0)` no reescala nada.
+    ///
+    /// No es una opción de esta etapa sino de la anterior: dice a qué resolución
+    /// se segmenta, y de ahí sale lo que significan todas las demás, que están en
+    /// píxeles absolutos. Ver [`crate::resample`], que es donde está el argumento.
+    pub simplify: Option<f64>,
     /// Bits por canal a los que se recorta el color antes de agrupar.
     pub color_precision: u8,
     /// Distancia máxima en Oklab entre un color y su representante en la paleta.
@@ -134,6 +143,13 @@ pub struct ClusterOptions {
     /// una mota compacta de ruido se erosiona una corona por pasada, mientras que
     /// un detalle que sí es dibujo no se mueve por muchas que se den.
     pub smoothing: usize,
+    /// Cuánto puede moverse un vértice del contorno para quitarle el temblor de
+    /// la escalera, en píxeles de trabajo. `0` lo deja como sale del trazado.
+    ///
+    /// No es un suavizado: el tope es lo que garantiza que un vértice no acabe
+    /// lejos de donde la imagen dice que está el borde, y las esquinas no se
+    /// tocan. Ver [`crate::wobble`].
+    pub relax: f64,
     /// Buscar grupos de bandas que sean una rampa y fundir cada uno en una sola
     /// figura con `<linearGradient>`. Ver [`crate::ramp`].
     ///
@@ -146,14 +162,18 @@ pub struct ClusterOptions {
     /// Área hasta la que una región se funde con una vecina. `0` no funde nada.
     /// Ver [`crate::speckle`].
     pub filter_speckle: usize,
-    /// Grosor por debajo del cual una región se funde con una vecina, aunque su
-    /// área sea grande. `0` no funde nada. Ver [`crate::speckle::thickness`].
+    /// Grosor por debajo del cual una región **puede** fundirse con una vecina,
+    /// aunque su área sea grande. `0` no funde nada. Ver
+    /// [`crate::speckle::thickness`].
     ///
-    /// El valor por defecto, `1.0`, es exactamente el grosor de un bloque de
-    /// `2x2`, así que se lleva **todo** lo que mida un píxel de ancho: los
-    /// rebordes de antialias, que es para lo que está, y también una línea fina
-    /// que sí fuese dibujo. En una foto los primeros son órdenes de magnitud más
-    /// numerosos; en un dibujo de línea fina, esto va a `0`.
+    /// Es un candidato, no una condena: de las regiones delgadas sólo se funden
+    /// las que son una **mezcla** de sus dos vecinas, que es lo que separa el
+    /// reborde de antialias de un trazo de tinta, porque los dos miden lo mismo.
+    /// Ver [`crate::speckle`], que es donde está el argumento y la medida.
+    ///
+    /// Por defecto, el grosor del rasgo más pequeño que la escala de trabajo
+    /// promete conservar: nada más delgado que eso *y* además explicable como
+    /// mezcla tiene por qué llegar al documento.
     pub min_thickness: f64,
     /// Hasta cuánta diferencia **de luz** se funden dos colores que por lo demás
     /// son el mismo, aunque pasen de `tolerance`. `0` no relaja nada.
@@ -211,18 +231,40 @@ pub struct ClusterOptions {
 impl Default for ClusterOptions {
     fn default() -> Self {
         ClusterOptions {
+            simplify: None,
             color_precision: 5,
             tolerance: 0.045,
             subpixel: true,
+            relax: 0.75,
             smoothing: 2,
             ramps: true,
             alpha_threshold: 128,
-            filter_speckle: 4,
-            min_thickness: 1.0,
-            // Apagado: bandear es una decisión de estilo, y de las que se toman
-            // mirando el resultado. Lo que hace por defecto la tolerancia ya
-            // reparte una rampa en escalones; esto los ensancha a propósito.
-            gradient_step: 0.0,
+            // Los dos umbrales de motas salen del mismo sitio, que es el mando de
+            // simplificar: el área y el grosor del rasgo más pequeño que la escala
+            // de trabajo promete conservar, `resample::FEATURE` de lado. Un `4`
+            // absoluto era lo justo en un dibujo de 300 px y nada en uno de 5 Mpx,
+            // y ese desajuste es lo que la escala de trabajo quita de en medio.
+            filter_speckle: (crate::resample::FEATURE * crate::resample::FEATURE) as usize,
+            min_thickness: crate::resample::FEATURE,
+            // Poco, pero no nada, y el motivo no es bandear: es la **tinta
+            // partida**. Un trazo de dos píxeles nunca llega a tinta plena, así
+            // que el trazo entero es una mezcla y uno fino sale más claro que uno
+            // gordo; la paleta los separa y el mismo trazo aparece a trozos en dos
+            // tonos, casi negro y gris oscuro. Son el mismo color con distinta
+            // dilución, que es exactamente lo que esto funde.
+            //
+            // Medido, en la portada y en el aerógrafo:
+            //
+            // | escalón | portada | aerógrafo | qué se ve |
+            // | --- | --- | --- | --- |
+            // | 0 | 19 colores, 662 paths, 119 KB | 21, 131, 40 KB | trazos a trozos de dos tonos |
+            // | **0,05** | **16, 450, 94 KB** | **19, 137, 40 KB** | el pelo sale macizo; el sombreado sigue |
+            // | 0,10 | 14, 497, 116 KB | 13, 97, 33 KB | más paths en la portada: bandas nuevas |
+            // | 0,15 | 13, 283, 90 KB | | fronteras moteadas, y aplana el volumen |
+            //
+            // Y no estorba a los degradados, que era la duda: el cielo sintético
+            // sigue saliendo de una pieza con un solo `<linearGradient>`.
+            gradient_step: 0.05,
             // Medido sobre tres imágenes que no se parecen en nada —la portada de
             // un JPEG con trazo, un aerógrafo escaneado de 5 Mpx y un pixel art
             // reescalado—, y las tres coinciden en el mismo sitio: es donde la
@@ -386,6 +428,7 @@ pub fn from_image_with(
         &mut clustering,
         options.filter_speckle,
         options.min_thickness,
+        options.tolerance,
     );
     if options.remove_background {
         background::remove_clustered(&mut clustering);

@@ -48,7 +48,7 @@ let config = Config::grid(GridOptions {
 let mut config = Config::default();
 config.grid_options_mut().unwrap().remove_background = true;
 
-// The photo path, behind the `photo` feature:
+// The illustration path, behind the `illustration` feature:
 let config = Config::cluster(ClusterOptions {
     tolerance: 0.06,
     remove_background: true,
@@ -71,22 +71,24 @@ let config = Config::cluster(ClusterOptions {
 
 ### `ClusterOptions`
 
-Needs the `photo` feature, on by default through `cli`. Nothing here is shared
-with `GridOptions`: they are two readings of what the image is, and the numbers
-are not on the same scale. See [the curves mode](curves.md) for why each one
-exists.
+Needs the `illustration` feature, on by default through `cli`. Nothing here is
+shared with `GridOptions`: they are two readings of what the image is, and the
+numbers are not on the same scale. See [the illustration mode](illustration.md)
+for why each one exists.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
+| `simplify: Option<f64>` | `None` | The smallest feature that survives, in per mille of the long side, which picks the resolution the image is segmented at. `None` uses `resample::SIMPLIFY`; `Some(0.0)` segments on the source's own lattice. Every other field here is an absolute pixel count, so this is what fixes what they mean. |
 | `color_precision: u8` | `5` | Bits per channel the colour is cut to before grouping. |
 | `tolerance: f64` | `0.045` | Maximum Oklab distance between a colour and its palette entry. Black to white is `1.0`. |
 | `smoothing: usize` | `2` | Passes that regularise the palette assignment against each pixel's neighbourhood. `0` turns it off. Loosens the tolerance guarantee to `smooth::CEILING` × it. |
 | `subpixel: bool` | `true` | Place each contour vertex where the image says the edge is, instead of on the integer lattice. Read only by the fits that can draw off it. |
+| `relax: f64` | `0.75` | How far a contour vertex may move, in working pixels, to file off the staircase wobble. Corners stay put; the cap is what keeps this from being a smoothing. |
 | `ramps: bool` | `true` | Merge each group of bands that one linear gradient reproduces into a single shape with a `<linearGradient>`. Loosens the tolerance guarantee by `ramp::CEILING` × it. |
 | `alpha_threshold: u8` | `128` | Minimum alpha for a pixel to count as visible. |
-| `filter_speckle: usize` | `4` | Area up to which a region merges into a neighbour. `0` merges nothing. |
-| `min_thickness: f64` | `1.0` | Thickness (`2 × area / perimeter`) below which a region merges into a neighbour. `1.0` is a 2×2 block, so it removes everything one pixel wide. |
-| `gradient_step: f64` | `0.0` | How much *lightness* difference is merged past the tolerance. Widens gradient bands; flattens shading. |
+| `filter_speckle: usize` | `9` | Area up to which a region merges into a neighbour. `0` merges nothing. It is `resample::FEATURE²`: the area of the smallest feature the working scale promises to keep. |
+| `min_thickness: f64` | `3.0` | Thickness (`2 × area / perimeter`) below which a region **may** merge into a neighbour — it does only if its colour is a mixture of its two main neighbours, which is what tells an antialiasing fringe from an ink stroke of the same width. |
+| `gradient_step: f64` | `0.05` | How much *lightness* difference is merged past the tolerance. A little is on by default for split ink — a thin stroke never reaches full ink, so the palette splits one stroke into two tones. Raising it widens gradient bands and flattens shading. |
 | `min_color_share: f64` | `0.002` | What a colour has to be worth, as a fraction of the image, to get an entry of its own. `0` gives one to anybody. Loosens the tolerance guarantee to `cluster::SNAP_CEILING` × it. |
 | `max_colors: usize` | `0` | Cap on palette entries. `0` is no cap. Drops the tolerance guarantee. |
 | `palette: Vec<Rgba>` | empty | An imposed palette. Non-empty means exactly this palette, nothing added. |
@@ -116,7 +118,7 @@ the wasm reader use to pick one from a fitter's name.
 
 `Fit::Spline` does not produce smaller files than `Fit::Polygon` — it is 10–25%
 bigger at the same tolerance — and that is not a defect: it buys an outline that
-stays smooth at any zoom. See [the curves notes](curves.md).
+stays smooth at any zoom. See [the illustration notes](illustration.md).
 
 Fitting happens **once per half-edge**, before rings are assembled, so the two
 faces of a shared boundary get identical geometry. `fit::Fitted` is the type that
@@ -188,13 +190,14 @@ let offset = out.offset();   // Option<(f64, f64)>
 
 | Feature | What it pulls in |
 | --- | --- |
-| `cli` (default) | The binary, the image decoders and the photo path. |
+| `cli` (default) | The binary, the image decoders and the illustration path. |
 | `formats` | Just the decoders, for `convert`. |
-| `photo` | Cluster segmentation: `cluster`, `speckle`, `boundary` and `Segmentation::Cluster`. |
+| `illustration` | Cluster segmentation: `cluster`, `speckle`, `boundary` and `Segmentation::Cluster`. |
+| `photo` | Legacy alias of `illustration`, from when the mode had that name. |
 | `wasm` | The JavaScript bindings ([`src/wasm.rs`](../src/wasm.rs)). |
 
-`photo` is separate so a pixel-art-only wasm bundle can leave the photo code out:
-whoever comes to convert a sprite has no reason to download it.
+`illustration` is separate so a pixel-art-only wasm bundle can leave that code
+out: whoever comes to convert a sprite has no reason to download it.
 
 The web build takes none of them except `wasm`, which is what keeps the wasm
 around 150 KB: the browser decodes, so the image codecs are half a megabyte of
@@ -211,7 +214,7 @@ With `--features wasm`, `wasm-pack` produces one function per segmentation, each
 taking a plain object of camelCase keys, all optional:
 
 ```js
-import init, { convertRgba, convertPhoto } from "./pkg/img2svg.js";
+import init, { convertRgba, convertIllustration } from "./pkg/img2svg.js";
 await init();
 
 const out = convertRgba(width, height, rgba, {
@@ -223,8 +226,9 @@ const out = convertRgba(width, height, rgba, {
 console.log(out.svg, out.gridWidth, out.colors);
 out.free();
 
-// Adding `photo` to the features adds this one, returning a PhotoConversion.
-const photo = convertPhoto(width, height, rgba, {
+// Adding `illustration` to the features adds this one, returning an
+// IllustrationConversion.
+const illustration = convertIllustration(width, height, rgba, {
   tolerance: 0.045,
   colorPrecision: 5,
   filterSpeckle: 4,
@@ -233,8 +237,8 @@ const photo = convertPhoto(width, height, rgba, {
   maxColors: 0,
   removeBackground: false,
 });
-console.log(photo.svg, photo.canvasWidth, photo.regions);
-photo.free();
+console.log(illustration.svg, illustration.canvasWidth, illustration.regions);
+illustration.free();
 ```
 
 Two functions rather than one with a `mode` key, because the two option sets do

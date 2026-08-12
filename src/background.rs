@@ -17,7 +17,7 @@
 //! es un color exacto. Comparar por igualdad no es una limitación heredada, es
 //! que el trabajo está hecho antes.
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 use crate::cluster::{self, Clustering, NONE};
 use crate::color::Rgba;
 use crate::grid::PixelMap;
@@ -114,7 +114,7 @@ fn border_color(map: &PixelMap) -> Option<Rgba> {
 /// mismo de ese color encerrado dentro del dibujo se queda, igual que en la
 /// versión de [`PixelMap`], pero aquí sale de la definición en vez de hacer falta
 /// recorrer: una región es ya un bloque conexo, así que o llega al borde o no.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub fn remove_clustered(clustering: &mut Clustering) -> Option<Rgba> {
     let color = border_color_of(clustering)?;
     let (w, h) = (clustering.width, clustering.height);
@@ -155,7 +155,7 @@ pub fn remove_clustered(clustering: &mut Clustering) -> Option<Rgba> {
 }
 
 /// Color que domina el borde de un etiquetado, si alguno lo hace de verdad.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn border_color_of(clustering: &Clustering) -> Option<Rgba> {
     let (w, h) = (clustering.width, clustering.height);
     if w == 0 || h == 0 {
@@ -193,7 +193,7 @@ fn border_color_of(clustering: &Clustering) -> Option<Rgba> {
 ///
 /// Las regiones no cambian: el rectángulo es el de **todos** los píxeles
 /// visibles, así que ninguna se queda fuera ni pierde un píxel.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 pub fn trim_clustered(clustering: &mut Clustering) {
     let (w, h) = (clustering.width, clustering.height);
     let visible = || {

@@ -85,7 +85,7 @@ fn la_cuantizacion_tambien_recorta_el_alfa() {
     assert_eq!(niveles.len(), 4);
 }
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 mod oklab {
     use super::rgb;
     use img2svg::color::{Oklab, Rgba};

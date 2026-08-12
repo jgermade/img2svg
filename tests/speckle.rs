@@ -1,5 +1,5 @@
 //! Filtrado de motas: qué se funde, en quién, y qué no se toca.
-#![cfg(feature = "photo")]
+#![cfg(feature = "illustration")]
 
 use image::RgbaImage;
 use img2svg::cluster::{self, ClusterOptions, Clustering, NONE};
@@ -66,7 +66,14 @@ fn filtrado(
             ..ClusterOptions::default()
         },
     );
-    speckle::filter(&mut c, max_area, min_thickness);
+    // La tolerancia es la de la paleta con la que se acaba de agrupar: es la que
+    // fija cuánto puede apartarse un reborde de la mezcla de sus vecinas.
+    speckle::filter(
+        &mut c,
+        max_area,
+        min_thickness,
+        ClusterOptions::default().tolerance,
+    );
     c
 }
 
@@ -123,22 +130,78 @@ fn lo_que_pasa_del_umbral_no_se_toca() {
     assert_eq!(dibujo(&c, paleta), vec!["RRRRR", "RGGGR", "RGGGR", "RRRRR"]);
 }
 
+/// Una banda delgada que **es una mezcla** de lo que tiene a los dos lados
+/// sobrevive al umbral de área y cae por grosor. Es el reborde de antialias.
+///
+/// El hallazgo que trajo el umbral de grosor: una banda de 1x5 tiene cinco
+/// píxeles, así que el área no la ve.
 #[test]
-fn la_banda_delgada_sobrevive_al_umbral_de_area_y_cae_por_grosor() {
-    // El hallazgo que cambió el diseño: una banda de 1x5 tiene cinco píxeles, así
-    // que el área no la ve. Es el reborde de antialias de cualquier borde.
-    let paleta = &[('R', ROJO), ('G', VERDE)];
-    let dibujo_original = &["RRRRR", "GGGGG", "RRRRR", "RRRRR"];
+fn el_reborde_sobrevive_al_area_y_cae_por_grosor() {
+    // MEZCLA es la media de rojo y verde: exactamente lo que el antialias del
+    // original deja entre una zona roja y una verde.
+    const MEZCLA: Rgba = Rgba {
+        r: 128,
+        g: 107,
+        b: 58,
+        a: 255,
+    };
+    let paleta = &[('R', ROJO), ('G', VERDE), ('M', MEZCLA)];
+    let dibujo_original = &["RRRRR", "MMMMM", "GGGGG", "GGGGG"];
 
     let solo_area = filtrado(dibujo_original, paleta, 4, 0.0);
     assert_eq!(solo_area.clusters.len(), 3, "el área deja la banda viva");
 
     let con_grosor = filtrado(dibujo_original, paleta, 4, 1.0);
-    assert_eq!(con_grosor.clusters.len(), 1, "el grosor sí la funde");
     assert_eq!(
-        dibujo(&con_grosor, paleta),
-        vec!["RRRRR", "RRRRR", "RRRRR", "RRRRR"]
+        con_grosor.clusters.len(),
+        2,
+        "el grosor la propone y la mezcla la condena: quedan rojo y verde"
     );
+    let filas = dibujo(&con_grosor, paleta);
+    assert_eq!(filas[0], "RRRRR", "el rojo se queda arriba");
+    assert_eq!(&filas[2..], &["GGGGG", "GGGGG"], "y el verde abajo");
+    assert!(
+        filas[1] == "RRRRR" || filas[1] == "GGGGG",
+        "la banda se va con una de las dos, no con un tercer color: {:?}",
+        filas[1]
+    );
+}
+
+/// Y una banda delgada que **no** es una mezcla se queda, con la misma geometría
+/// y el mismo umbral. Es un trazo de tinta.
+///
+/// Éste es el caso que el umbral de grosor a secas se llevaba por delante, y con
+/// él las gafas, la boca y las cejas de cualquier ilustración de línea: en una
+/// imagen pequeña un trazo mide un píxel, igual que un reborde.
+#[test]
+fn un_trazo_fino_no_es_un_reborde_y_se_queda() {
+    let paleta = &[('R', ROJO), ('G', VERDE), ('A', AZUL)];
+    // Azul entre rojo y verde: alineado con nada. Ninguna mezcla de rojo y verde
+    // se parece a él, por mucho que la banda sea igual de delgada que la de
+    // arriba.
+    let c = filtrado(&["RRRRR", "AAAAA", "GGGGG", "GGGGG"], paleta, 4, 1.0);
+    assert_eq!(c.clusters.len(), 3, "el trazo tiene que seguir ahí");
+    assert_eq!(dibujo(&c, paleta)[1], "AAAAA");
+}
+
+/// El caso de una sola vecina, que es el trazo dentro de una zona lisa: la boca
+/// sobre la piel. El segmento degenera en un punto y la distancia es al color de
+/// esa vecina, así que sale del mismo criterio sin regla aparte.
+#[test]
+fn un_trazo_rodeado_de_un_solo_color_se_queda() {
+    let paleta = &[('R', ROJO), ('A', AZUL)];
+    let c = filtrado(
+        &["RRRRRRR", "RAAAAAR", "RRRRRRR", "RRRRRRR"],
+        paleta,
+        4,
+        1.0,
+    );
+    assert_eq!(
+        c.clusters.len(),
+        2,
+        "una línea sobre un fondo liso es dibujo"
+    );
+    assert_eq!(dibujo(&c, paleta)[1], "RAAAAAR");
 }
 
 #[test]
@@ -328,7 +391,7 @@ fn en_una_imagen_grande_recorta_de_verdad_y_deprisa() {
 
     let mut despues = antes.clone();
     let empezado = std::time::Instant::now();
-    speckle::filter(&mut despues, 4, 1.0);
+    speckle::filter(&mut despues, 4, 1.0, ClusterOptions::default().tolerance);
     let tardado = empezado.elapsed();
 
     println!(

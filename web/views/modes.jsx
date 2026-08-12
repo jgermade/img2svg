@@ -11,13 +11,6 @@
 // mira cada panel para enseñar o esconder el deslizador.
 export const FIT_TOLERANCE = { polygon: 0.75, spline: 1.5 };
 
-// Foto endereza sobre la retícula de la **imagen**, donde un rasgo pequeño mide
-// pocos píxeles; pixelart lo hace sobre la del **dibujo**, donde mide los que el
-// autor quiso. Por eso el polígono arranca más abajo aquí: pasado raíz(2)/2 una
-// escalera de 45 grados colapsa en su diagonal, y el borde de una lente de gafas
-// es una sucesión de escaleras cortas de 45 grados, así que colapsa con ella.
-export const PHOTO_FIT_TOLERANCE = { ...FIT_TOLERANCE, polygon: 0.5 };
-
 export const FIT_OPTIONS = [
   { value: "pixel", label: "Escalera de píxel" },
   { value: "polygon", label: "Polígono simplificado" },
@@ -99,8 +92,8 @@ export const MODES = {
     },
   },
 
-  photo: {
-    name: "Foto",
+  illustration: {
+    name: "Ilustración",
     hint: "sin rejilla, por colores",
     note: (
       <>
@@ -110,22 +103,26 @@ export const MODES = {
       </>
     ),
     defaults: {
+      autoSimplify: true,
+      simplify: 5,
       tolerance: 0.045,
       smoothing: 2,
       subpixel: true,
+      relax: 0.75,
       ramps: true,
       // En tanto por ciento, que es como lo enseña el deslizador; la opción del
       // wasm va en tanto por uno.
       minColorShare: 0.2,
-      gradientStep: 0,
+      gradientStep: 0.05,
       // A diferencia de pixelart, aquí no hay ninguna escalera que preservar
       // —sólo la de la retícula—, y enderezarla quita entre un 23% y un 32% del
       // fichero sin que se note en el dibujo.
       fit: "polygon",
-      // Por debajo de raíz(2)/2, que es donde una escalera de 45 grados colapsa
-      // en su diagonal y, de paso, una lente de gafas en un octógono: sobre la
-      // retícula las dos son localmente lo mismo.
-      fitTolerance: 0.5,
+      // La de fábrica, y no una más estrecha: la escala de trabajo lleva el rasgo
+      // pequeño a tres píxeles, y ahí los escalones de la retícula —0.5 y
+      // raíz(2)/2, donde una escalera de 45 grados colapsa en su diagonal y una
+      // lente de gafas en un octógono— quedan por debajo y ya no muerden.
+      fitTolerance: 0.75,
       removeBackground: false,
       filterSpeckle: 4,
       minThickness: 1,
@@ -141,6 +138,7 @@ export const MODES = {
         tolerance: v.tolerance,
         smoothing: v.smoothing,
         subpixel: v.subpixel,
+        relax: v.relax,
         ramps: v.ramps,
         minColorShare: v.minColorShare / 100,
         gradientStep: v.gradientStep,
@@ -151,6 +149,9 @@ export const MODES = {
         removeBackground: v.removeBackground,
         ...fitOptions(v),
       };
+      // Ausente quiere decir automático, así que sólo se manda cuando el
+      // usuario ha tomado el mando.
+      if (!v.autoSimplify) opts.simplify = v.simplify;
       if (v.capColors && Number(v.maxColors) >= 2) {
         opts.maxColors = Number(v.maxColors);
       }
@@ -163,7 +164,13 @@ export const MODES = {
         meta: `${canvas} px`,
         stats:
           (out.background ? `fondo ${out.background} quitado · ` : "") +
-          `lienzo ${canvas} · ${out.colors} colores · ` +
+          `lienzo ${canvas}` +
+          // La escala sólo se nombra cuando ha habido reescalado; y es lo que
+          // dice qué ha elegido el automático.
+          (out.scale && out.scale !== 1
+            ? ` (escala ×${out.scale.toFixed(2)})`
+            : "") +
+          ` · ${out.colors} colores · ` +
           `${out.regions} regiones · ${out.paths} paths` +
           // Sólo cuando los hay: en un dibujo de colores planos no sale ninguno
           // y la línea no tiene por qué decirlo.
@@ -173,8 +180,11 @@ export const MODES = {
   },
 };
 
-/** `#curves` era el nombre de esta pestaña antes de que tuviera motor. */
-const HASH_ALIASES = { curves: "photo" };
+/**
+ * Nombres viejos de esta pestaña: `#curves` cuando no tenía motor y `#photo`
+ * cuando el modo se llamaba así. Los enlaces de fuera siguen valiendo.
+ */
+const HASH_ALIASES = { curves: "illustration", photo: "illustration" };
 
 export function modeFromHash() {
   const hash = location.hash.slice(1);

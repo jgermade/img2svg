@@ -59,11 +59,27 @@ fn header(out: &Conversion, extra: &str) -> String {
                 ))
             ),
         ),
-        #[cfg(feature = "photo")]
-        Detail::Cluster { regions, ramps } => (
+        #[cfg(feature = "illustration")]
+        Detail::Cluster {
+            regions,
+            ramps,
+            scale,
+        } => (
             format!(
-                "  lienzo      {}x{}\n  regiones    {}\n  degradados  {}\n",
-                out.canvas.0, out.canvas.1, regions, ramps
+                "  lienzo      {}x{}\n{}  regiones    {}\n  degradados  {}\n",
+                out.canvas.0,
+                out.canvas.1,
+                // La escala sólo aparece cuando ha habido reescalado, que es lo
+                // que deja intactas las instantáneas que trabajan sobre la
+                // retícula del original: una línea nueva en todas ellas movería
+                // las once de pixel art sin que nada haya cambiado.
+                if scale == 1.0 {
+                    String::new()
+                } else {
+                    format!("  escala      x{scale:.3}\n")
+                },
+                regions,
+                ramps
             ),
             String::new(),
         ),

@@ -5,16 +5,16 @@ import { Header } from "./Header.jsx";
 import { Footer } from "./Footer.jsx";
 import { Preview } from "./Preview.jsx";
 import { PixelartPanel } from "./PixelartPanel.jsx";
-import { PhotoPanel } from "./PhotoPanel.jsx";
+import { IllustrationPanel } from "./IllustrationPanel.jsx";
 import { MODES, modeFromHash } from "./modes.jsx";
 
-const PANELS = { pixelart: PixelartPanel, photo: PhotoPanel };
+const PANELS = { pixelart: PixelartPanel, illustration: IllustrationPanel };
 
 export function App() {
   const [mode, setMode] = useState(modeFromHash);
   const [settings, setSettings] = useState(() => ({
     pixelart: { ...MODES.pixelart.defaults },
-    photo: { ...MODES.photo.defaults },
+    illustration: { ...MODES.illustration.defaults },
   }));
 
   const active = converter.active.value;

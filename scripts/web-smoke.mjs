@@ -52,7 +52,7 @@ const CAMPOS = {
     ],
     opcionales: ["checkerCell", "checkerCoverage", "background"],
   },
-  photo: {
+  illustration: {
     obligatorios: [
       "svg",
       "canvasWidth",
@@ -117,8 +117,8 @@ const PALETA = {
   "+": [250, 250, 250, 255],
 };
 
-/** Un degradado vertical con dos bloques planos encima, para el camino de foto. */
-function foto() {
+/** Un degradado vertical con dos bloques planos encima, para la ilustración. */
+function ilustracion() {
   const [w, h] = [64, 48];
   const buf = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y += 1) {
@@ -152,7 +152,7 @@ await init.default({
 });
 
 const sprite = raster(SPRITE, 3, PALETA);
-const dibujo = foto();
+const dibujo = ilustracion();
 
 const casos = [
   {
@@ -161,9 +161,9 @@ const casos = [
       init.convertRgba(sprite.width, sprite.height, sprite.data, opciones),
   },
   {
-    nombre: "photo",
+    nombre: "illustration",
     convert: (opciones) =>
-      init.convertPhoto(dibujo.width, dibujo.height, dibujo.data, opciones),
+      init.convertIllustration(dibujo.width, dibujo.height, dibujo.data, opciones),
   },
 ];
 
@@ -219,11 +219,11 @@ for (const { nombre, convert } of casos) {
   ajustado.free();
 }
 
-// El avance sólo lo cuenta el camino de foto, y es lo único de la API de JS que
+// El avance sólo lo cuenta el camino de ilustración, y es lo único de la API de JS que
 // no se puede comprobar mirando lo que devuelve: hay que ver si llaman.
 console.log("\nprogreso");
 const avisos = [];
-const conProgreso = init.convertPhoto(
+const conProgreso = init.convertIllustration(
   dibujo.width,
   dibujo.height,
   dibujo.data,

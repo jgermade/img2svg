@@ -1,4 +1,4 @@
-import { Field, Row } from "../components/Field.jsx";
+import { Field, Row, RowLabel } from "../components/Field.jsx";
 import {
   Check,
   ColorInput,
@@ -9,19 +9,42 @@ import {
 } from "../components/inputs.jsx";
 import { Advanced } from "../components/Advanced.jsx";
 import { Actions } from "../components/Actions.jsx";
-import { FIT_OPTIONS, PHOTO_FIT_TOLERANCE, fitPatch } from "./modes.jsx";
+import { FIT_OPTIONS, FIT_TOLERANCE, fitPatch } from "./modes.jsx";
 
-export function PhotoPanel({ hidden, values: v, onChange, actions }) {
+export function IllustrationPanel({ hidden, values: v, onChange, actions }) {
   const set = (key) => (value, opts) => onChange({ [key]: value }, opts);
 
   return (
     <aside
       class="controls"
-      id="panel-photo"
+      id="panel-illustration"
       role="tabpanel"
-      aria-labelledby="tab-photo"
+      aria-labelledby="tab-illustration"
       hidden={hidden}
     >
+      <Field
+        label="Simplificación"
+        hint="El rasgo más pequeño que sobrevive, en tantos por mil del lado largo. Es lo que decide a qué resolución se reinterpreta el dibujo: en una imagen pequeña sube de escala, que es lo que recupera el borde escrito en el antialias, y en una grande baja, que es lo que promedia el grano. Subirlo simplifica."
+      >
+        <Row>
+          <Check checked={v.autoSimplify} onChange={set("autoSimplify")} />
+          <RowLabel>automática</RowLabel>
+        </Row>
+        <input
+          type="range"
+          min="2"
+          max="15"
+          step="0.5"
+          value={v.simplify}
+          disabled={v.autoSimplify}
+          onInput={(e) =>
+            onChange({ simplify: Number(e.currentTarget.value) }, {
+              continuous: true,
+            })
+          }
+        />
+      </Field>
+
       <Range
         label="Tolerancia de color"
         value={v.tolerance}
@@ -57,7 +80,7 @@ export function PhotoPanel({ hidden, values: v, onChange, actions }) {
         label="Contorno"
         value={v.fit}
         options={FIT_OPTIONS}
-        onChange={(fit, opts) => onChange(fitPatch(fit, PHOTO_FIT_TOLERANCE), opts)}
+        onChange={(fit, opts) => onChange(fitPatch(fit), opts)}
         hint="El polígono junta en un tramo recto los escalones que no dibujan nada: el mismo dibujo con bastante menos SVG. Las curvas no comprimen —salen algo más grandes—, pero el contorno sigue siendo liso por mucho que se amplíe."
       />
 
@@ -68,8 +91,8 @@ export function PhotoPanel({ hidden, values: v, onChange, actions }) {
         min="0.25"
         max="3"
         step="0.05"
-        hidden={!(v.fit in PHOTO_FIT_TOLERANCE)}
-        hint="Cuánto puede apartarse la línea del contorno original. A 0.71 una escalera de 45º colapsa en su diagonal, y con ella el borde de cualquier curva pequeña —una lente de gafas sale octogonal—, por eso arranca justo por debajo. En una imagen grande, donde los rasgos miden cientos de píxeles, subirla a 0.75 comprime bastante y no se pierde nada."
+        hidden={!(v.fit in FIT_TOLERANCE)}
+        hint="Cuánto puede apartarse la línea del contorno. Se suma a lo que haya limado el temblor: entre las dos, ningún punto acaba más lejos que la suma. Subirla comprime y, pasado el punto en que un rasgo mide pocas veces la desviación, redondea las curvas pequeñas."
         onChange={set("fitTolerance")}
       />
 
@@ -79,6 +102,17 @@ export function PhotoPanel({ hidden, values: v, onChange, actions }) {
         checked={v.subpixel}
         onChange={set("subpixel")}
         hint="El contorno sale de recorrer grietas entre píxeles, así que sus vértices caen en la retícula entera: una lente de gafas de dieciséis píxeles no puede ser redonda. El color de los píxeles del borde dice por dónde corta de verdad, y con eso se recolocan. Cuesta bytes —fuera de la retícula un tramo recto necesita dos números con decimales en vez de uno— y lo que compra es sitio, así que en una imagen grande, donde los rasgos ya miden cientos de píxeles, no hay nada que ganar."
+      />
+
+      <Range
+        label="Limar el temblor"
+        suffix="px"
+        value={v.relax}
+        min="0"
+        max="1.5"
+        step="0.05"
+        hint="El contorno sale de recorrer grietas entre píxeles, así que un canto oblicuo sale a peldaños, y los de un dibujo real son irregulares: el simplificador no los puede tirar sin salirse de lo que promete, y los escribe. Esto los lima moviendo los vértices, como mucho lo que diga el deslizador y sin tocar las esquinas, que se reconocen por el giro a lo largo del contorno. A 0, el contorno tal como sale del trazado."
+        onChange={set("relax")}
       />
 
       <Toggle

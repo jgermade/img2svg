@@ -97,7 +97,7 @@ impl Rgba {
 /// El camino de la rejilla sigue con la distancia en RGB: es la que produjo sus
 /// once instantáneas y cambiarla las movería todas de golpe, sin que eso mejore
 /// nada de lo que ese camino hace.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Oklab {
     /// Luminosidad, 0..1 aproximadamente.
@@ -111,7 +111,7 @@ pub struct Oklab {
     pub alpha: f32,
 }
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 impl Oklab {
     /// Matrices de Björn Ottosson: sRGB lineal → LMS, raíz cúbica, LMS → Lab.
     //
@@ -169,7 +169,7 @@ impl Oklab {
     }
 }
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 impl From<Rgba> for Oklab {
     fn from(c: Rgba) -> Self {
         Oklab::from_rgba(c)
@@ -178,7 +178,7 @@ impl From<Rgba> for Oklab {
 
 /// De sRGB con gamma a sRGB lineal, por tabla: la potencia de 2.4 es de lejos lo
 /// más caro de la conversión, y sólo hay 256 valores posibles de entrada.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn srgb_to_linear(c: u8) -> f32 {
     use std::sync::OnceLock;
     static LUT: OnceLock<[f32; 256]> = OnceLock::new();

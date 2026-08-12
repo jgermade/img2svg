@@ -87,7 +87,7 @@ function stage(name) {
   };
 }
 
-// Avance de verdad, que sólo manda el camino de foto: en cuanto llega el
+// Avance de verdad, que sólo manda el camino de ilustración: en cuanto llega el
 // primero se apaga el pulso, porque ya hay algo que contar. El de pixel art no
 // manda ninguno y se queda con el pulso, que es lo honesto cuando lo que se
 // sabe es «está en ello».

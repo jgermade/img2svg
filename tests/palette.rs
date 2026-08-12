@@ -1,5 +1,5 @@
 //! Bandeado de degradados, tope de colores, paleta impuesta y retirada de fondo.
-#![cfg(feature = "photo")]
+#![cfg(feature = "illustration")]
 
 use std::collections::BTreeSet;
 
@@ -117,10 +117,14 @@ fn ensanchar_por_luz_no_funde_tonos_distintos() {
     assert_eq!(tolerante.colors, 1, "la tolerancia sí los funde");
 }
 
+/// A cero, el paso de degradado no funde nada por encima de la tolerancia: la
+/// rampa sale con las bandas que reparte la tolerancia y ni una menos.
+///
+/// Es la referencia contra la que se lee el valor de fábrica, que no es cero
+/// —viene puesto por la tinta partida— y por tanto sí funde.
 #[test]
-fn el_paso_de_degradado_a_cero_no_cambia_nada() {
+fn el_paso_de_degradado_manda_sobre_las_bandas() {
     let img = rampa(256, 2);
-    let sin = cluster::from_image(&img, &opciones());
     let cero = cluster::from_image(
         &img,
         &ClusterOptions {
@@ -128,8 +132,33 @@ fn el_paso_de_degradado_a_cero_no_cambia_nada() {
             ..opciones()
         },
     );
-    assert_eq!(colores(&sin), colores(&cero));
-    assert_eq!(sin.labels, cero.labels);
+    // Sin el paso, la única cota es la tolerancia, y una rampa de negro a blanco
+    // —distancia 1 en Oklab— tiene que dar unas cuantas bandas: aquí no se afirma
+    // el número exacto porque no lo decide sólo la tolerancia, la luz de Oklab no
+    // es lineal en sRGB y `min_color_share` también poda.
+    assert!(
+        cero.colors > 8,
+        "una rampa entera en {} bandas no es la tolerancia mandando",
+        cero.colors
+    );
+
+    let de_fabrica = cluster::from_image(&img, &opciones());
+    assert!(
+        de_fabrica.colors < cero.colors,
+        "y con el paso de fábrica tienen que salir menos: {} contra {}",
+        de_fabrica.colors,
+        cero.colors
+    );
+    assert!(
+        colores(&de_fabrica).iter().all(|hex| {
+            // Sigue siendo gris: el paso funde a lo largo de la luz y no mueve el
+            // tono, que es lo que lo distingue de subir la tolerancia.
+            let (r, g, b) = (&hex[1..3], &hex[3..5], &hex[5..7]);
+            r == g && g == b
+        }),
+        "el paso no debe mover el tono: {:?}",
+        colores(&de_fabrica)
+    );
 }
 
 #[test]
@@ -347,6 +376,12 @@ fn las_motas_del_fondo_se_van_con_el_fondo() {
         ),
         &ClusterOptions {
             remove_background: true,
+            // El umbral va escrito y no por defecto porque este dibujo mide 8x5:
+            // el de fábrica es el área del rasgo más pequeño que la escala de
+            // trabajo conserva, y aquí no hay escala de trabajo —se llama a la
+            // etapa directamente—, así que se pide el que separa este caso: la
+            // mota de un píxel se va y el bloque de ocho se queda.
+            filter_speckle: 4,
             ..ClusterOptions::default()
         },
     );

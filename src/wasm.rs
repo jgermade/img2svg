@@ -6,7 +6,7 @@
 use js_sys::Reflect;
 use wasm_bindgen::prelude::*;
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 use crate::{ClusterOptions, Progress};
 use crate::{Config, Fit, GridOptions, Grouping};
 
@@ -108,21 +108,21 @@ pub fn convert_rgba(
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// Resultado de una conversión de foto.
+/// Resultado de una conversión de ilustración.
 ///
 /// Es un tipo aparte y no unos cuantos `undefined` más en [`Conversion`]: los
 /// dos caminos no comparten casi ninguna cifra —no hay rejilla, ni celda, ni
 /// damero, y sí un recuento de regiones— y así el `.d.ts` **gana** un tipo en
 /// vez de que el que ya consume la página se llene de campos opcionales.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 #[wasm_bindgen]
-pub struct PhotoConversion {
+pub struct IllustrationConversion {
     inner: crate::Conversion,
 }
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 #[wasm_bindgen]
-impl PhotoConversion {
+impl IllustrationConversion {
     #[wasm_bindgen(getter)]
     pub fn svg(&self) -> String {
         self.inner.svg.clone()
@@ -176,6 +176,17 @@ impl PhotoConversion {
         }
     }
 
+    /// Escala a la que se ha segmentado, respecto a la imagen que llegó. Es lo
+    /// que la página tiene que enseñar cuando `simplify` va en automático: es la
+    /// única forma de ver qué ha elegido.
+    #[wasm_bindgen(getter)]
+    pub fn scale(&self) -> f64 {
+        match self.inner.detail {
+            crate::Detail::Cluster { scale, .. } => scale,
+            _ => 1.0,
+        }
+    }
+
     /// Color de fondo retirado, en hexadecimal, o `undefined`.
     #[wasm_bindgen(getter)]
     pub fn background(&self) -> Option<String> {
@@ -183,20 +194,20 @@ impl PhotoConversion {
     }
 }
 
-/// Convierte un búfer RGBA por el camino de foto.
+/// Convierte un búfer RGBA por el camino de ilustración.
 ///
 /// Va aparte de [`convert_rgba`] en vez de mirar una clave `mode` dentro de las
 /// opciones porque son dos juegos de ajustes que no se solapan: una función por
 /// segmentación deja que cada una lea sólo lo suyo, y que el `.d.ts` diga cuál
 /// devuelve qué.
-#[cfg(feature = "photo")]
-#[wasm_bindgen(js_name = convertPhoto)]
-pub fn convert_photo(
+#[cfg(feature = "illustration")]
+#[wasm_bindgen(js_name = convertIllustration)]
+pub fn convert_illustration(
     width: u32,
     height: u32,
     data: &[u8],
-    #[wasm_bindgen(unchecked_param_type = "PhotoOptions")] options: &JsValue,
-) -> Result<PhotoConversion, JsError> {
+    #[wasm_bindgen(unchecked_param_type = "IllustrationOptions")] options: &JsValue,
+) -> Result<IllustrationConversion, JsError> {
     let config = read_cluster_config(options);
 
     // El aviso de avance es una función, así que llega por aquí y no por el
@@ -219,17 +230,23 @@ pub fn convert_photo(
         &config,
         &mut Progress::new(&mut report),
     )
-    .map(|inner| PhotoConversion { inner })
+    .map(|inner| IllustrationConversion { inner })
     .map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// Las claves de foto, para el `.d.ts`. Escrita a mano contra
+/// Las claves de ilustración, para el `.d.ts`. Escrita a mano contra
 /// [`read_cluster_config`], que es lo que de verdad las lee.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 #[wasm_bindgen(typescript_custom_section)]
-const PHOTO_OPTIONS: &str = r#"
-/** Opciones de `convertPhoto`. Todas opcionales. */
-export interface PhotoOptions extends FitOptions {
+const ILLUSTRATION_OPTIONS: &str = r#"
+/** Opciones de `convertIllustration`. Todas opcionales. */
+export interface IllustrationOptions extends FitOptions {
+    /**
+     * El rasgo más pequeño que sobrevive, en tantos por mil del lado largo, que
+     * es lo que decide a qué resolución se segmenta. Si no viene, se elige solo;
+     * `0` trabaja sobre la retícula del original.
+     */
+    simplify?: number;
     /** Bits por canal que se conservan al cuantizar, de 1 a 8. */
     colorPrecision?: number;
     /** Distancia de color por debajo de la cual dos píxeles son el mismo. */
@@ -238,6 +255,11 @@ export interface PhotoOptions extends FitOptions {
     smoothing?: number;
     /** Colocar los vértices donde la imagen dice que está el borde, no en la retícula. */
     subpixel?: boolean;
+    /**
+     * Cuánto puede moverse un vértice, en píxeles, para quitarle al contorno el
+     * temblor de la escalera. `0` lo deja como sale del trazado.
+     */
+    relax?: number;
     /** Fundir en un `<linearGradient>` los grupos de bandas que son una rampa. */
     ramps?: boolean;
     /** Alfa por debajo del cual un píxel se considera transparente, 0-255. */
@@ -260,16 +282,16 @@ export interface PhotoOptions extends FitOptions {
      * Aviso de avance, de 0 a 1. Se llama como mucho una vez por cada tanto por
      * ciento.
      *
-     * Sólo lo tiene el camino de foto: es el que puede tardar medio segundo en
-     * una imagen de 4 Mpx. El de pixel art reduce la imagen a la rejilla en el
-     * primer paso y a partir de ahí trabaja sobre unas decenas de píxeles de
-     * lado, así que no hay avance que contar.
+     * Sólo lo tiene el camino de ilustración: es el que puede tardar medio
+     * segundo en una imagen de 4 Mpx. El de pixel art reduce la imagen a la
+     * rejilla en el primer paso y a partir de ahí trabaja sobre unas decenas de
+     * píxeles de lado, así que no hay avance que contar.
      */
     onProgress?: (fraction: number) => void;
 }
 "#;
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn read_cluster_config(options: &JsValue) -> Config {
     let default = ClusterOptions::default();
     if options.is_falsy() {
@@ -278,6 +300,9 @@ fn read_cluster_config(options: &JsValue) -> Config {
     let o = Options(options);
 
     let cluster = ClusterOptions {
+        // Ausente es automático y `0` no reescala, así que aquí no hay
+        // `unwrap_or`: la ausencia **es** un valor.
+        simplify: o.number("simplify"),
         color_precision: o
             .byte("colorPrecision")
             .unwrap_or(default.color_precision)
@@ -285,6 +310,7 @@ fn read_cluster_config(options: &JsValue) -> Config {
         tolerance: o.number("tolerance").unwrap_or(default.tolerance),
         smoothing: o.count("smoothing").unwrap_or(default.smoothing),
         subpixel: o.flag("subpixel").unwrap_or(default.subpixel),
+        relax: o.number("relax").unwrap_or(default.relax),
         ramps: o.flag("ramps").unwrap_or(default.ramps),
         alpha_threshold: o.byte("alphaThreshold").unwrap_or(default.alpha_threshold),
         filter_speckle: o.count("filterSpeckle").unwrap_or(default.filter_speckle),
@@ -365,8 +391,8 @@ impl Options<'_> {
     }
 
     /// Un entero no negativo, que es lo que son todos los contadores de la API.
-    /// Sólo lo usa el camino de foto, que puede estar compilado fuera.
-    #[cfg(feature = "photo")]
+    /// Sólo lo usa el camino de ilustración, que puede estar compilado fuera.
+    #[cfg(feature = "illustration")]
     fn count(&self, key: &str) -> Option<usize> {
         self.number(key).map(|v| v.max(0.0) as usize)
     }

@@ -7,7 +7,7 @@
 
 // Sólo la comprobación de costuras necesita las tablas, y sólo existe con la
 // segmentación que comparte fronteras entre regiones.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 use std::collections::{HashMap, HashSet};
 
 use img2svg::{Config, Conversion, Fit, GridOptions};
@@ -250,7 +250,7 @@ fn number(chars: &[char], i: &mut usize) -> f64 {
 /// Y con curvas hay que comparar **la curva entera**, controles incluidos: dos
 /// cúbicas que empiezan y acaban donde mismo pueden ir por sitios distintos, y
 /// entre las dos quedaría el mismo pelo de fondo que con dos rectas.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn comprueba_costuras(out: &Conversion) {
     let (w, h) = (out.canvas.0 as f64, out.canvas.1 as f64);
     let paths = subpaths(&out.svg);
@@ -305,17 +305,17 @@ fn comprueba_costuras(out: &Conversion) {
 /// Una coordenada como entero de centésimas, que es la precisión con la que se
 /// escribe. Hace falta para poder meterlas en una tabla, y de paso dice que lo
 /// que se compara es lo escrito y no lo que se tenía en memoria.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 type Key = (i64, i64);
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn key(p: Point) -> Key {
     ((p.0 * 100.0).round() as i64, (p.1 * 100.0).round() as i64)
 }
 
 /// Los cuatro puntos de una curva, orientados siempre igual, para que la misma
 /// curva dibujada en los dos sentidos dé la misma clave.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn canonical(seg: &Seg) -> [Key; 4] {
     let seg = if key(seg.from) <= key(seg.to) {
         *seg
@@ -327,7 +327,7 @@ fn canonical(seg: &Seg) -> [Key; 4] {
 }
 
 /// Parte un segmento por los vértices que caen dentro de él.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn split((a, b): (Point, Point), vertices: &HashSet<Key>) -> Vec<(Key, Key)> {
     let (a, b) = (key(a), key(b));
     let d = (b.0 - a.0, b.1 - a.1);
@@ -494,7 +494,7 @@ fn el_suavizado_depende_del_ajuste() {
 /// colores —incluidos nodos por los que la frontera pasa de largo, que son los
 /// que un ajuste por anillo simplificaría de forma distinta en cada cara.
 #[test]
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn las_dos_caras_de_una_frontera_se_ajustan_igual() {
     let dibujo = &[
         "rrrrr####",
@@ -604,7 +604,7 @@ fn un_circulo_sale_liso() {
 /// cúbica mal invertida deja de coincidir consigo misma: mismos extremos, otros
 /// controles, y entre las dos caras asoma el fondo.
 #[test]
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn las_dos_caras_de_una_frontera_curva_se_ajustan_igual() {
     let (w, h) = (120u32, 120u32);
     let discos = [(45.0f64, 60.0f64, 34.0f64, NEGRO), (75.0, 60.0, 34.0, ROJO)];
@@ -638,13 +638,13 @@ fn las_dos_caras_de_una_frontera_curva_se_ajustan_igual() {
 
 /// El mismo dibujo por la segmentación de clustering, que es la que comparte
 /// fronteras entre regiones. La de rejilla traza cada una por su cuenta.
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn convert_cluster(rows: &[&str], fit: Fit) -> Conversion {
     let (w, h, buf) = pixels(rows);
     convert_cluster_buf(w, h, &buf, fit)
 }
 
-#[cfg(feature = "photo")]
+#[cfg(feature = "illustration")]
 fn convert_cluster_buf(w: u32, h: u32, buf: &[u8], fit: Fit) -> Conversion {
     use img2svg::ClusterOptions;
 
@@ -655,6 +655,10 @@ fn convert_cluster_buf(w: u32, h: u32, buf: &[u8], fit: Fit) -> Conversion {
             // un dibujo de este tamaño es todo motas.
             filter_speckle: 0,
             min_thickness: 0.0,
+            // Y sobre su propia retícula: estos dibujos se escriben fila a fila
+            // para que el contorno sea exactamente el que se quiere ajustar, así
+            // que elegir escala de trabajo mediría otro contorno.
+            simplify: Some(0.0),
             ..ClusterOptions::default()
         })
     };

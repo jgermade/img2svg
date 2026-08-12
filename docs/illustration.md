@@ -1,23 +1,29 @@
-# The curves mode
+# The illustration mode
 
-**Both axes ship.** Segmentation for photos is built, tested and reachable from
-all three surfaces — `Segmentation::Cluster` in the library, `img2svg photo` on
-the CLI, the Foto tab on the page — and so are all three fitters: `pixel`,
-`polygon` and `spline`. This page explains why it is a separate axis rather than
-a flag, and what each part is for.
+**Both axes ship.** Segmentation for images that sit on no grid is built, tested
+and reachable from all three surfaces — `Segmentation::Cluster` in the library,
+`img2svg illustration` on the CLI, the Ilustración tab on the page — and so are
+all three fitters: `pixel`, `polygon` and `spline`. This page explains why it is
+a separate axis rather than a flag, and what each part is for.
+
+The mode was called `photo` until 2026-08-11, and the name was wrong about what
+it is for: the target is a **web illustration** — few colours, few curves, crisp
+edges where the source has them. `photo` still works as an alias on the CLI, as
+a cargo feature and as a URL hash. See
+[`SESSIONS/2026-08-11_22h08`](../SESSIONS/2026-08-11_22h08.illustration-and-the-working-scale.md).
 
 ## Why it is not just an option
 
 The pixel art mode assumes the image has a regular grid: it detects the period,
 reduces the image to one logical pixel per cell, and traces axis-aligned
-outlines. Every one of those steps is wrong for a photo.
+outlines. Every one of those steps is wrong for an image that has no grid.
 
 So `img2svg` has two orthogonal axes, the same decomposition VTracer uses:
 
 | Segmentation — image to regions | Fitting — contour to path |
 | --- | --- |
 | `grid` — the pixel art path above | `pixel` — the literal staircase, `h`/`v` |
-| `cluster` — colour clustering, for photos | `polygon` — simplified straight segments |
+| `cluster` — colour clustering, off the grid | `polygon` — simplified straight segments |
 | | `spline` — cubic Béziers |
 
 They compose. The interesting one is **`grid` + `spline`**: vectorising a sprite
@@ -29,10 +35,10 @@ drawing.
 ## What is built so far
 
 The whole segmentation half — colour groundwork, clustering, speck filtering,
-boundaries and background removal — all behind the `photo` cargo feature, so a
-pixel-art-only build can leave it out, and all of it reachable through
-`Segmentation::Cluster`, `img2svg photo`, the Foto tab and four snapshots of its
-own in `tests/photo.rs`. (The published page ships one bundle with both: the gate
+boundaries and background removal — all behind the `illustration` cargo feature,
+so a pixel-art-only build can leave it out, and all of it reachable through
+`Segmentation::Cluster`, `img2svg illustration`, the Ilustración tab and four
+snapshots of its own in `tests/illustration.rs`. (The published page ships one bundle with both: the gate
 costs 57 KB raw but only 17 KB brotli, which is not worth two builds.)
 
 **Oklab** (`color.rs`). Clustering needs a colour distance where one threshold
@@ -209,7 +215,7 @@ It pays for itself: at two passes the whole conversion runs 0.79 s against 0.84 
 with it off, because the boundary and document stages have that much less to do.
 
 **What did not need retuning.** With regularisation and the palette floor in
-place, the other three photo defaults were re-measured and all three stayed:
+place, the other three illustration defaults were re-measured and all stayed:
 
 - `min_thickness: 1.0` still earns its keep — dropping it to `0.5` on the
   illustration takes paths from 551 back up to 921. Regularisation removes
@@ -528,13 +534,95 @@ curves, controls included, because two cubics that start and end together can
 still bulge apart, and the gap between them would show the background exactly as
 two disagreeing polylines would.
 
-**Real progress on the page.** The photo path now reports how far along it is
+**Real progress on the page.** The illustration path now reports how far along it is
 through a callback, and the page draws a real bar instead of a pulsing one. The
 weights are measured, not guessed — on a 2730×1536 corpus image, of 471 ms: 148
 palette, 172 labelling, 46 specks, 79 boundaries, 26 document. Two thirds of the
 time is two passes over the image, and those report per row; the rest reports per
 stage. The sprite path reports nothing but completion, because after the first
 step it is working on a drawing a few dozen pixels across.
+
+## The working scale, which comes before everything else
+
+Added 2026-08-12, and it reframes every constant on this page.
+
+Each simplification constant in this mode is an **absolute pixel count** — a speck
+area, a thickness, a fit deviation — and the lattice they are compared against is
+the source's own. What those numbers mean therefore depends on how many pixels the
+image spends on a feature, and two images never agree about that:
+
+| image | a feature measures | its grain measures | so the constants are |
+| --- | --- | --- | --- |
+| a 300×300 album cover | ~2 px | ~1 px | the size of the drawing |
+| a 1800×2823 airbrush scan | ~200 px | ~2 px | the size of the noise |
+
+On the first there is no lattice for a curve to live on; on the second nothing is
+simplified at all. That single misfit explains everything this page and the
+sessions had been fighting: why upscaling the cover 4× fixed it, why sub-pixel
+contours helped it and did nothing for the scan, why `filter_speckle: 4` "does not
+scale with the canvas", and why the tolerance ladder had no rung to stand on — the
+rungs are at 0.5 and √2/2 **absolute pixels**, so they stop biting as soon as the
+lattice is fine compared to the tolerance.
+
+So the mode now picks a working resolution before it looks at a pixel. The knob is
+not the resolution but the thing one actually wants: `simplify`, the smallest
+feature that survives, in per mille of the long side. From it, the image is
+resampled so that feature lands on `resample::FEATURE` = 3 working pixels, and
+every other constant is defined at that scale — `filter_speckle` is `FEATURE²`,
+`min_thickness` is `FEATURE`, and the polygon tolerance went back to the shared
+0.75 because the rungs no longer reach it.
+
+The consequence worth writing down: since the feature is asked for as a fraction of
+the image, **the working canvas depends only on `simplify` and not on the size of
+the file**. A thumbnail and a 5 Mpx scan with the same `simplify` are segmented at
+the same size, which is what makes one number mean the same thing in both.
+
+Measured on the two images in `examples/results-to-improve/`, everything else
+unchanged at the time:
+
+| | colours | paths | SVG |
+| --- | --- | --- | --- |
+| `cover.jpg` on its own lattice | 20 | 501 | 77.3 KB |
+| the same at ×2 | 16 | 318–450 | 60–94 KB, and the strokes are whole |
+| `Sonic1.png` on its own lattice | 21 | 6,895 | 1,870 KB |
+| the same at 383×600 | 19 | 137 | 35 KB |
+
+Resampling premultiplies alpha, filters separably, and picks its kernel by
+direction: a triangle of radius `1/scale` going down, which is an area average and
+is what removes grain, and Catmull-Rom going up, which reconstructs the edge the
+source's antialiasing wrote inside the pixel instead of leaving it blunt. Upscaling
+is capped at 4×: past that there is no edge left to recover.
+
+### Two stages that the working scale made possible
+
+**Ink is not fringe** (`speckle.rs`). A thickness threshold removes antialiasing
+fringes, and it removes ink strokes too, because on a small drawing they measure
+the same. What separates them is colour: a fringe's entry sits on the segment
+between its two neighbours' entries — it is a mixture of them — and a stroke's does
+not. Thickness now only nominates; the mixture test decides, and the ceiling is
+three tolerances because the fringe's own entry, both endpoints and `min_color_share`
+each carry error. At one tolerance the halo survives; at five, palette entries start
+being merged. A stroke with a single neighbour needs no special case: the segment
+degenerates to a point and black ink is nowhere near skin.
+
+**Filing off the wobble** (`wobble.rs`). The simplifier undoes *regular*
+staircases, but a real drawing's are irregular — a nearly straight edge alternates
+two- and three-pixel steps following the source's noise — and that alternation
+leaves the chord by more than the tolerance, so the simplifier is obliged to write
+it. At 6× that reads as a contour trembling pixel by pixel, which is what "it looks
+pixelated" was about. No tolerance fixes it, because the wobble and the drawing
+measure the same; what fixes it is *moving* vertices rather than choosing which
+ones stay. A binomial pass with a hard cap does it, and corners are recognised at
+scale — the turn of an arc is spread over many vertices and a corner's is
+concentrated in one — so they stay exactly where they were. It lives in the vertex
+displacements, next to `subpixel`'s, so `Fit::Pixel` ignores it for the same
+reason. On the cover: 94.4 KB → 84.3 KB with the same 450 paths.
+
+That last stage is also what finally made the spline fitter competitive, though
+still not the default: with a smooth contour it beats the polygon by 16% of the
+anchors on the airbrush scan and still loses by 14% on the cover, which is corners
+rather than arcs. The rule of thumb from two sessions ago survives: `spline` is for
+smooth drawings, `polygon` for everything else.
 
 ## What the plan got wrong along the way
 
@@ -553,7 +641,7 @@ about to undo it by simplifying assembled rings. See the polygon fitter above.
 
 What is left, and in what order, lives in the newest file in
 [`SESSIONS/`](../SESSIONS/) — currently
-[`2026-08-10-17h02.curves-and-a-progress-bar.md`](../SESSIONS/2026-08-10-17h02.curves-and-a-progress-bar.md).
+[`2026-08-11_22h08.illustration-and-the-working-scale.md`](../SESSIONS/2026-08-11_22h08.illustration-and-the-working-scale.md).
 The original decision is in
 [`2026-08-09-10h00.img2svg-two-axes.md`](../SESSIONS/2026-08-09-10h00.img2svg-two-axes.md);
 the files between the two record how each stage was reasoned about, including
