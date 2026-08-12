@@ -84,7 +84,7 @@ for why each one exists.
 | `smoothing: usize` | `2` | Passes that regularise the palette assignment against each pixel's neighbourhood. `0` turns it off. Loosens the tolerance guarantee to `smooth::CEILING` × it. |
 | `subpixel: bool` | `true` | Place each contour vertex where the image says the edge is, instead of on the integer lattice. Read only by the fits that can draw off it. |
 | `relax: f64` | `0.75` | How far a contour vertex may move, in working pixels, to file off the staircase wobble. Corners stay put; the cap is what keeps this from being a smoothing. |
-| `ramps: bool` | `true` | Merge each group of bands that one linear gradient reproduces into a single shape with a `<linearGradient>`. Loosens the tolerance guarantee by `ramp::CEILING` × it. |
+| `ramps: bool` | `true` | Merge each group of bands that one gradient reproduces into a single shape, painted with a `<linearGradient>` or a `<radialGradient>` — whichever explains it better. A group of only two colours qualifies when the seam between them is **soft** (`softness.rs`), which is what a shading terminator looks like. Loosens the tolerance guarantee by `ramp::CEILING` × it. |
 | `alpha_threshold: u8` | `128` | Minimum alpha for a pixel to count as visible. |
 | `filter_speckle: usize` | `9` | Area up to which a region merges into a neighbour. `0` merges nothing. It is `resample::FEATURE²`: the area of the smallest feature the working scale promises to keep. |
 | `min_thickness: f64` | `3.0` | Thickness (`2 × area / perimeter`) below which a region **may** merge into a neighbour — it does only if its colour is a mixture of its two main neighbours, which is what tells an antialiasing fringe from an ink stroke of the same width. |

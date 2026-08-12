@@ -81,11 +81,13 @@ higher tolerance (1.5 against 0.75) — see [docs/illustration.md](docs/illustra
 why, and for the measurements.
 
 In `illustration`, a smooth ramp does not fit in a palette — a region has one colour and
-that is all — so it arrives as a stack of flat bands. Where one linear gradient
-reproduces a whole group of them, they are merged into a single shape with a
-`<linearGradient>`: on a grainy sky that is 121 shapes and 70.6 KB down to 3 and
-5.9 KB, with the banding gone. A hard edge does not pass the test and stays hard.
-`--no-ramps` turns it off.
+that is all — so it arrives as a stack of flat bands. Where one gradient reproduces a
+whole group of them, they are merged into a single shape painted with it: on a grainy
+sky that is 121 shapes and 70.6 KB down to 3 and 5.9 KB, with the banding gone. The
+gradient comes out `<linearGradient>` or `<radialGradient>` depending on which one
+explains the group, because the shading of a round surface falls off with distance from
+a point and through an axis it comes out smeared. A hard edge does not pass the test and
+stays hard. `--no-ramps` turns it off.
 
 When an image comes out wrong it is nearly always the grid: check the cell size
 in the report and pin it by hand with `--scale`. Full option list in

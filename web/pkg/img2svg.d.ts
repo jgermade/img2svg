@@ -213,7 +213,6 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_conversion_free: (a: number, b: number) => void;
-    readonly __wbg_illustrationconversion_free: (a: number, b: number) => void;
     readonly conversion_background: (a: number) => [number, number];
     readonly conversion_cellHeight: (a: number) => number;
     readonly conversion_cellWidth: (a: number) => number;
@@ -229,16 +228,17 @@ export interface InitOutput {
     readonly conversion_svg: (a: number) => [number, number];
     readonly convertIllustration: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
     readonly convertRgba: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
-    readonly illustrationconversion_background: (a: number) => [number, number];
     readonly illustrationconversion_ramps: (a: number) => number;
     readonly illustrationconversion_regions: (a: number) => number;
     readonly illustrationconversion_scale: (a: number) => number;
-    readonly illustrationconversion_svg: (a: number) => [number, number];
     readonly illustrationconversion_canvasHeight: (a: number) => number;
     readonly illustrationconversion_canvasWidth: (a: number) => number;
     readonly illustrationconversion_colors: (a: number) => number;
     readonly illustrationconversion_paths: (a: number) => number;
     readonly illustrationconversion_subpaths: (a: number) => number;
+    readonly __wbg_illustrationconversion_free: (a: number, b: number) => void;
+    readonly illustrationconversion_background: (a: number) => [number, number];
+    readonly illustrationconversion_svg: (a: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

@@ -156,7 +156,8 @@ Takes the same [shared options](#shared-options). Its own:
 | `--no-subpixel` | off | Keeps contour vertices on the integer lattice instead of where the image says the edge is. |
 | `--relax <N>` | `0.75` | How far a contour vertex may move, in working pixels, to file off the staircase wobble. Corners do not move. |
 | `--no-relax` | off | Leaves the contour exactly as the tracing produced it. |
-| `--no-ramps` | off | Keeps every band of a gradient as its own flat shape instead of merging them into a `<linearGradient>`. |
+| `--softness` | off | Prints how soft each boundary is and writes no SVG. Softness is what decides which seams may become a gradient with only two colours, and which groups get the radial model tried on them; this is how to check the measure against the drawing when a gradient shows up where it should not, or does not where it should. |
+| `--no-ramps` | off | Keeps every band of a gradient as its own flat shape instead of merging them into a `<linearGradient>` or `<radialGradient>`. |
 | `-a, --alpha-threshold <N>` | `128` | Minimum alpha for a pixel to count as visible. |
 | `--filter-speckle <N>` | `9` | Area in pixels up to which a region merges into a neighbour. |
 | `--min-thickness <N>` | `3` | Thickness below which a region **may** merge into a neighbour — only if its colour is a mixture of its two main neighbours. |
@@ -197,8 +198,8 @@ pixels, `width`/`height` in the image's own.
 ### The report
 
 ```
-lienzo 600x600 (escala x2.00), 447 regiones, 3 degradados
-16 colores, 450 paths, 699 subtrazados -> cover.svg (84.3 KB)
+lienzo 600x600 (escala x2.00), 434 regiones, 6 degradados
+16 colores, 440 paths, 688 subtrazados -> cover.svg (84.3 KB)
 ```
 
 The region count is the number to watch when tuning the speck filters: the colour
@@ -235,12 +236,21 @@ rule: the segment degenerates to a point, and the stroke is nowhere near it.
 not fit in a palette — a region has one colour and that is all — so it arrives as
 a stack of bands whose boundaries draw nothing: they only mark where the ramp
 crossed a quantisation threshold, following the noise of the source. A group of
-bands that one linear gradient reproduces is merged into a single shape with that
+bands that one gradient reproduces is merged into a single shape with that
 gradient. On a 900×600 sky with photographic grain that is 121 shapes and 70.6 KB
 down to 3 and 5.9 KB, with the banding gone. On flat-colour artwork it finds
 almost nothing, which is correct, and then it costs a little — about 2 KB and 10%
 of the conversion time on an album cover. A hard edge does not pass the test and
 stays hard.
+
+The gradient comes out `<linearGradient>` or `<radialGradient>` according to which
+one explains the group — a sky is colour along an axis, and the shading of a round
+surface is colour by distance from a centre, which through an axis comes out smeared
+along a direction the drawing does not have. And a group of just **two** colours can
+be a gradient too, but only where the seam between them is soft: a shading
+terminator is two tones with a wide transition between them, and by colour count
+alone it would never qualify, so a belly came out with a hard crescent across it.
+`--softness` prints that measure.
 
 It pulls against `--min-color-share`, which is worth knowing: that option drops
 the palette entries that paint little, the middle of a ramp paints little, and
@@ -253,4 +263,7 @@ lightness, leaving hue alone, so a smooth sky comes out in wider bands instead o
 many thin ones — 74 colours down to 31 at `0.15` on one image. On artwork with
 volume it does the opposite of what you want, because the shading *is* a
 lightness ramp and flattening it flattens the modelling; past about `0.15` the
-band boundaries start to mottle. Hence the default of 0.
+band boundaries start to mottle. Hence a default of `0.05`: a little, and not for
+banding but for **split ink** — a thin stroke never reaches full ink, so the palette
+splits one stroke into two tones and the same stroke shows up in patches of near
+black and dark grey.

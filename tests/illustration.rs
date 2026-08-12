@@ -487,6 +487,170 @@ fn la_rampa_sale_de_una_pieza() {
     );
 }
 
+/// Un foco sobre una pared sale como **un** degradado radial, y no como uno
+/// lineal.
+///
+/// Es el otro modelo, y hace falta porque el error de usar el que no toca no es
+/// pequeño: un sombreado que cae con la distancia a un punto, explicado con la
+/// proyección sobre un eje, sale embadurnado a lo largo de una dirección que no
+/// existe en el dibujo. Aquí se comprueba que el ajuste elige, y que elige bien.
+///
+/// Se prueba con el foco **en el centro del lienzo y descentrado**, porque son dos
+/// casos distintos del ajuste. Centrado, las bandas son anillos completos y
+/// concéntricos: todos tienen el mismo centroide, así que no hay ninguna dirección
+/// en la que el color cambie más y el eje ni existe —el grupo sólo puede crecer si
+/// el modelo radial entra en el crecimiento, y no si se elige al final—. Descentrado
+/// hay eje, y entonces lo que se comprueba es que el radial le gana.
+#[test]
+fn un_foco_es_un_degradado_radial() {
+    for luz in [(40.0f64, 40.0f64), (25.0, 25.0)] {
+        let (w, h) = (80usize, 80usize);
+        // Hasta la esquina más lejana, para que la caída llegue al final del lienzo.
+        let alcance = (w as f64 - luz.0).hypot(h as f64 - luz.1);
+        let mut buf = Vec::with_capacity(w * h * 4);
+        for y in 0..h {
+            for x in 0..w {
+                let t = (x as f64 - luz.0).hypot(y as f64 - luz.1) / alcance;
+                let l = 235.0 - 165.0 * t;
+                buf.extend_from_slice(&[l as u8, (l * 0.80) as u8, (l * 0.58) as u8, 255]);
+            }
+        }
+        let out =
+            img2svg::convert_rgba(w as u32, h as u32, &buf, &Config::cluster(en_la_reticula()))
+                .expect("la conversión no debe fallar");
+
+        assert!(out.colors > 3, "la caída tiene que dar varias bandas");
+        assert_eq!(
+            ramps(&out),
+            1,
+            "una caída, un degradado, con la luz en {luz:?}"
+        );
+        assert!(
+            out.svg.contains("<radialGradient"),
+            "y con la geometría que le toca, no con la otra:\n{}",
+            out.svg.lines().take(4).collect::<Vec<_>>().join("\n")
+        );
+        assert!(
+            !out.svg.contains("<linearGradient"),
+            "el eje no explica esto y no tiene que aparecer"
+        );
+
+        // Y el centro cae donde está el foco. Sale de ajustar un círculo a la
+        // costura, así que no es exacto —la costura es un arco de unos cuantos
+        // píxeles de ancho—, pero sí tiene que ser ese sitio y no otro.
+        let cx: f64 = atributo(&out.svg, "cx=\"");
+        let cy: f64 = atributo(&out.svg, "cy=\"");
+        assert!(
+            (cx - luz.0).hypot(cy - luz.1) < 8.0,
+            "el centro del degradado ({cx}, {cy}) tiene que estar en el foco {luz:?}"
+        );
+    }
+}
+
+/// El primer valor de un atributo del documento, para mirar dónde acabó un
+/// degradado.
+fn atributo(svg: &str, name: &str) -> f64 {
+    let rest = &svg[svg.find(name).expect("el atributo tiene que estar") + name.len()..];
+    rest[..rest.find('"').expect("un atributo sin cerrar")]
+        .parse()
+        .expect("un número")
+}
+
+/// Con paleta impuesta de dos colores: así el grupo es **una pareja**, que es el
+/// único caso que la blandura de la costura decide por su cuenta.
+///
+/// El par se elige con un salto de color moderado —0,12 en Oklab— para que lo que
+/// esté a prueba sea la puerta y no el techo: con dos paradas el degradado se
+/// equivoca la mitad de lo que abarca por pura aritmética, así que una pareja de
+/// tonos muy lejanos se caería por el techo de la tolerancia antes de que nadie
+/// preguntase por la costura.
+fn a_dos_colores() -> ClusterOptions {
+    ClusterOptions {
+        palette: vec![
+            img2svg::color::Rgba::new(222, 196, 168, 255),
+            img2svg::color::Rgba::new(186, 158, 128, 255),
+        ],
+        filter_speckle: 0,
+        min_thickness: 0.0,
+        relax: 0.0,
+        smoothing: 0,
+        gradient_step: 0.0,
+        ..en_la_reticula()
+    }
+}
+
+/// Dos bandas de esos dos colores, con `difusa` filas de mezcla entre ellas.
+fn dos_bandas(difusa: usize) -> (u32, u32, Vec<u8>) {
+    let (w, h) = (40usize, 40 + difusa);
+    let opciones = a_dos_colores();
+    let (claro, oscuro) = (opciones.palette[0], opciones.palette[1]);
+    let mut buf = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        let c = match y {
+            y if y < 20 => claro,
+            y if y < 20 + difusa => {
+                let t = (y - 19) as f64 / (difusa + 1) as f64;
+                let mezcla =
+                    |a: u8, b: u8| (f64::from(a) + t * (f64::from(b) - f64::from(a))).round() as u8;
+                img2svg::color::Rgba::new(
+                    mezcla(claro.r, oscuro.r),
+                    mezcla(claro.g, oscuro.g),
+                    mezcla(claro.b, oscuro.b),
+                    255,
+                )
+            }
+            _ => oscuro,
+        };
+        for _ in 0..w {
+            buf.extend_from_slice(&[c.r, c.g, c.b, c.a]);
+        }
+    }
+    (w as u32, h as u32, buf)
+}
+
+/// Una costura difuminada junta dos bandas en un degradado, aunque sean dos
+/// colores y no tres.
+///
+/// Es la puerta que abre la medida de blandura, y la única forma de que una pareja
+/// entre. El motivo es el dibujo: la barriga de un personaje sombreado a aerógrafo
+/// son dos tonos con una transición ancha entre ellos, y por recuento de colores no
+/// llega a rampa nunca —serían dos paradas, que es hacer la media—, así que salía
+/// con una media luna de borde duro en medio del volumen.
+#[test]
+fn una_costura_blanda_junta_dos_bandas() {
+    let (w, h, buf) = dos_bandas(10);
+    let out = img2svg::convert_rgba(w, h, &buf, &Config::cluster(a_dos_colores()))
+        .expect("la conversión no debe fallar");
+
+    assert_eq!(out.colors, 2, "la paleta impuesta, tal cual");
+    assert_eq!(
+        ramps(&out),
+        1,
+        "dos bandas con la costura difuminada son una transición"
+    );
+    assert!(
+        out.svg.contains("<linearGradient"),
+        "y una costura recta se explica con un eje"
+    );
+}
+
+/// Y con la costura seca, las mismas dos bandas se quedan como están.
+///
+/// Es lo que hace que la puerta de arriba no sea una puerta abierta: dos regiones
+/// vecinas cualesquiera siempre se pueden partir con un degradado tendido, y lo que
+/// distingue una transición de un canto no es el ajuste —que en los dos casos vale
+/// igual— sino lo que el original pintó entre los dos colores.
+#[test]
+fn una_costura_dura_no_junta_dos_bandas() {
+    let (w, h, buf) = dos_bandas(0);
+    let out = img2svg::convert_rgba(w, h, &buf, &Config::cluster(a_dos_colores()))
+        .expect("la conversión no debe fallar");
+
+    assert_eq!(out.colors, 2, "el mismo par de colores");
+    assert_eq!(ramps(&out), 0, "un canto no es un degradado");
+    assert!(!out.svg.contains("Gradient"));
+}
+
 /// Un borde duro no se ablanda. Dos franjas de colores lejanos apiladas cumplen
 /// la parte geométrica de ser una rampa —el color va con la altura— y aun así no
 /// pueden salir como degradado, porque el escalón entre ellas es enorme.

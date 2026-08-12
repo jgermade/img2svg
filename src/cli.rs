@@ -251,10 +251,13 @@ struct Illustration {
     ///
     /// La blandura es cuántos píxeles tarda una frontera en pasar del color de una
     /// cara al de la otra: un trazo de tinta cambia en uno, el terminador de una
-    /// superficie redonda pintada a aerógrafo tarda cinco o diez. Es la medida de
-    /// la que dependería decidir dónde poner un degradado y dónde dejar el borde
-    /// duro, y está aquí para poder mirar la distribución antes de escribir
-    /// ningún criterio.
+    /// superficie redonda pintada a aerógrafo tarda cinco o diez. Es lo que decide
+    /// qué costuras pueden salir como degradado aunque sólo junten dos colores, y
+    /// a qué grupos se les prueba el degradado radial.
+    ///
+    /// Sirve para comprobar la medida contra el dibujo cuando un degradado sale
+    /// donde no toca o no sale donde debería: las costuras de una barriga o un
+    /// morro tienen que salir blandas, y los bordes de tinta duros.
     #[arg(long)]
     softness: bool,
 
@@ -263,8 +266,12 @@ struct Illustration {
     /// La paleta reparte una rampa continua en escalones, y las fronteras entre
     /// esas bandas no dibujan nada: sólo marcan por dónde cruzó la rampa un
     /// umbral de cuantización, siguiendo el ruido del original. Un grupo de
-    /// bandas que un solo <linearGradient> sabe reproducir se funde en una figura
-    /// con ese degradado, lo que baja a la vez colores, figuras y anclas.
+    /// bandas que un solo degradado sabe reproducir se funde en una figura con ese
+    /// degradado, lo que baja a la vez colores, figuras y anclas.
+    ///
+    /// El degradado sale <linearGradient> o <radialGradient> según cuál de los dos
+    /// explique mejor el grupo: un cielo es función de la proyección sobre un eje,
+    /// y el sombreado de una superficie redonda, de la distancia a un centro.
     ///
     /// Se aceptan grupos cuyo degradado acierta el color de cada banda; un borde
     /// duro, donde el salto entre bandas es grande, no pasa el corte y se queda

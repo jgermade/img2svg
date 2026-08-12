@@ -7,17 +7,19 @@
 //! contornos más retorcidos de todo el SVG, porque siguen el ruido del original.
 //!
 //! Un SVG sí sabe decir «degradado». Esto encuentra los grupos de bandas que lo
-//! son, los funde en una figura y los pinta con un `<linearGradient>`.
+//! son, los funde en una figura y los pinta con un `<linearGradient>` o un
+//! `<radialGradient>`, según cuál de los dos lo explique.
 //!
 //! # Qué es ser una rampa
 //!
-//! Un `<linearGradient>` expresa exactamente una cosa: **el color como función de
-//! la proyección de la posición sobre un eje**. Así que el criterio es esa misma
-//! cosa, con la condición de que el degradado sirva de algo:
+//! Un degradado de SVG expresa exactamente una cosa: **el color como función de una
+//! altura**, y la altura es la proyección sobre un eje o la distancia a un centro.
+//! Así que el criterio es esa misma cosa, con la condición de que el degradado sirva
+//! de algo:
 //!
-//! > Un grupo de regiones vecinas es una rampa cuando un solo degradado lineal
-//! > reproduce el color de todas ellas con un error que no pasa de [`CEILING`]
-//! > tolerancias **ni de la [`GAIN`]-ésima parte del color que abarca**.
+//! > Un grupo de regiones vecinas es una rampa cuando un solo degradado —lineal o
+//! > radial— reproduce el color de todas ellas con un error que no pasa de
+//! > [`CEILING`] tolerancias **ni de la [`GAIN`]-ésima parte del color que abarca**.
 //!
 //! Lo segundo no estaba en el plan y hace falta: un color plano ya reproduce
 //! cualquier grupo con un error igual a lo que el grupo abarca, así que un
@@ -32,6 +34,25 @@
 //! Oklab —el degradado puede torcerse por donde quiera— ni que la geometría se
 //! apile: dos colores a la misma altura del eje piden dos paradas en el mismo
 //! sitio, el error se dispara y el grupo se cae solo.
+//!
+//! # Los dos modelos
+//!
+//! Hacen falta los dos y ninguno suple al otro: un cielo o una pared iluminada son
+//! función de la proyección sobre un eje, y el terminador de una superficie redonda
+//! es función de la distancia a un punto, que con un eje sale embadurnado a lo largo
+//! de una dirección que el dibujo no tiene.
+//!
+//! Cuál de los dos lo decide el error de cada uno, con el desempate a favor del eje
+//! ([`PREFER`]). El centro del radial sale de la **curvatura de la costura** y no de
+//! los colores: la línea de nivel de un degradado radial es un círculo, así que la
+//! costura entre dos de sus bandas es un arco, y ajustarlo da el centro ([`circle`]).
+//!
+//! Y no todo grupo puede aspirar al radial: sólo se le prueba a los que tienen una
+//! costura **blanda**, que es la señal de que ahí hubo un sombreado y no un canto
+//! (ver [`crate::softness`]). Eso es lo que acota su coste, que no es despreciable:
+//! el recorrido de una banda sobre una distancia no se puede acotar por fuera con
+//! nada convexo —un anillo contiene su centro— y hay que medirlo sobre los píxeles,
+//! una pasada por imagen y centro. En un cartel de color plano no se mide ninguno.
 //!
 //! # Una parada por color
 //!
@@ -90,7 +111,9 @@
 //! así el documento sale más grande, porque la paleta fina cuesta más de lo que los
 //! degradados ahorran. Cada una gana en su sitio y no se puede tener las dos.
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use crate::cluster::NONE;
 use crate::color::{Oklab, Rgba};
@@ -136,6 +159,31 @@ const MIN_COLORS: usize = 3;
 /// le puede pedir a algo que quiere ser mejor que un color plano: equivocarse la
 /// mitad.
 pub const GAIN: f64 = 2.0;
+
+/// Cuánto mejor tiene que salirle el modelo radial a un grupo para quedárselo.
+///
+/// El desempate va al eje a propósito, y no es cosmética: un `<linearGradient>` es
+/// la descripción que un editor vectorial y un humano esperan de un sombreado
+/// tendido, y una costura con un radio de curvatura de trescientos píxeles la
+/// explican los dos igual de bien. Sin margen, el radial gana esos empates por unas
+/// milésimas y el documento sale lleno de círculos enormes centrados fuera del
+/// lienzo, que dibujan exactamente lo mismo.
+///
+/// Medido en un barrido de costuras del mismo par de colores, del arco cerrado a la
+/// recta —error del eje contra error del centro, en milésimas de Oklab:
+///
+/// | radio de la costura | eje | centro | se queda |
+/// | --- | --- | --- | --- |
+/// | 20 px | 119 | 69 | centro |
+/// | 40 px | 104 | 78 | centro |
+/// | 60 px | 86 | 75 | eje |
+/// | 100 px | 83 | 77 | eje |
+/// | 180 px, casi recta | 81 | 78 | eje |
+///
+/// El curvo gana siempre, porque el arco es de verdad un arco; lo que cambia es
+/// cuánto. Con `0,8` se lo queda mientras la curvatura se note y lo suelta cuando la
+/// costura es casi recta, que es donde las dos descripciones dibujan lo mismo.
+const PREFER: f64 = 0.8;
 
 /// Bandas que se le dan a un grupo para enseñar su tercer color.
 ///
@@ -218,31 +266,6 @@ impl Band {
         )
     }
 
-    /// Hasta dónde llega la banda sobre el modelo: el recorrido de alturas que
-    /// cubre, acotado por fuera.
-    ///
-    /// Acotado y no exacto, y siempre de más: una cota holgada rechaza rampas
-    /// legítimas, que es el lado seguro, mientras que una corta aceptaría grupos que
-    /// el degradado no reproduce.
-    fn extent(&self, model: &Model) -> (f64, f64) {
-        match *model {
-            Model::Linear { u } => self.span(u),
-            // Para la distancia a un centro basta la caja alineada, que está
-            // guardada exacta: las direcciones 0 y DIRS/2 son los dos ejes. El
-            // mínimo es cero si el centro cae dentro, y el máximo, la esquina más
-            // lejana.
-            Model::Radial { c } => {
-                let (x0, x1) = (f64::from(self.lo[0]), f64::from(self.hi[0]));
-                let (y0, y1) = (f64::from(self.lo[DIRS / 2]), f64::from(self.hi[DIRS / 2]));
-                let dx = (x0 - c.0).max(c.0 - x1).max(0.0);
-                let dy = (y0 - c.1).max(c.1 - y1).max(0.0);
-                let far = (x0 - c.0).abs().max((x1 - c.0).abs());
-                let up = (y0 - c.1).abs().max((y1 - c.1).abs());
-                ((dx * dx + dy * dy).sqrt(), (far * far + up * up).sqrt())
-            }
-        }
-    }
-
     /// Hasta dónde llega la banda sobre el eje `u`, acotado por las dos
     /// direcciones guardadas que lo abrazan.
     ///
@@ -290,7 +313,11 @@ pub fn merge(regions: &mut Regions, labels: &[u32], tolerance: f64, soft: &[bool
     }
     let bands = bands(regions, labels);
     let neighbours = neighbours(regions);
-    let soft_pairs = soft_pairs(regions, soft);
+    let seams = soft_seams(regions, soft);
+    let mut reaches = Reaches::new(labels, bands.len(), regions.width);
+    // Hasta dónde puede irse el centro de un degradado radial: más allá y lo que
+    // describe es un degradado lineal, que ya está entre los candidatos.
+    let limit = 4.0 * (regions.width as f64).hypot(regions.height as f64);
 
     // De la región más grande a la más pequeña: una rampa se reconoce por sus
     // bandas anchas, y empezar por una mota daría un eje sacado de nada.
@@ -309,9 +336,16 @@ pub fn merge(regions: &mut Regions, labels: &[u32], tolerance: f64, soft: &[bool
         if taken[seed] {
             continue;
         }
-        if let Some((group, fit)) =
-            grow(seed, &bands, &neighbours, &soft_pairs, &taken, tolerance)
-        {
+        if let Some((group, fit)) = grow(
+            seed,
+            &bands,
+            &neighbours,
+            &seams,
+            &mut reaches,
+            limit,
+            &taken,
+            tolerance,
+        ) {
             for &id in &group {
                 taken[id] = true;
             }
@@ -323,14 +357,11 @@ pub fn merge(regions: &mut Regions, labels: &[u32], tolerance: f64, soft: &[bool
     }
 
     // Las figuras se arman con `regions.edges` todavía intacto, así que hasta
-    // aquí no se toca nada de lo que dependen.
-    // El modelo se elige aquí, con el grupo ya cerrado: ver [`Fit::best`].
+    // aquí no se toca nada de lo que dependen. El modelo de cada grupo ya viene
+    // elegido: lo eligió el crecimiento, ver [`Fit::best_of`].
     regions.ramps = found
         .into_iter()
-        .map(|(group, fit)| {
-            let fit = Fit::best(&group, &bands, fit);
-            shape(regions, &group, &bands, &fit)
-        })
+        .map(|(group, fit)| shape(regions, &group, &bands, &fit))
         .collect();
     regions.regions = std::mem::take(&mut regions.regions)
         .into_iter()
@@ -417,16 +448,24 @@ fn neighbours(regions: &Regions) -> Vec<Vec<RegionId>> {
 /// reintento cuesta un ajuste entero, y en una imagen de 5 Mpx multiplicaba por
 /// tres el tiempo de la conversión a cambio de tres degradados más. Lo que se
 /// descarta aquí no se pierde: sigue libre para fundar su propio grupo.
+#[allow(clippy::too_many_arguments)]
 fn grow(
     seed: RegionId,
     bands: &[Band],
     neighbours: &[Vec<RegionId>],
-    soft_pairs: &HashSet<(RegionId, RegionId)>,
+    seams: &HashMap<(RegionId, RegionId), Seam>,
+    reaches: &mut Reaches,
+    limit: f64,
     taken: &[bool],
     tolerance: f64,
 ) -> Option<(Vec<RegionId>, Fit)> {
     let mut group = vec![seed];
     let mut best: Option<Fit> = None;
+    // El modelo radial del grupo, si alguna de sus costuras blandas se curva, y la
+    // longitud de la costura de la que salió: manda la más larga, que es la que
+    // mejor determina un círculo.
+    let mut radial: Option<Model> = None;
+    let mut largo = 0usize;
 
     let mut seen: HashSet<RegionId> = HashSet::from([seed]);
     let mut queue: Vec<RegionId> = Vec::new();
@@ -453,10 +492,34 @@ fn grow(
         }
         let candidate = queue[head];
         head += 1;
+        // La costura de la candidata con el grupo: si es blanda hay sombreado, y si
+        // además se curva, su centro de curvatura es el del degradado radial.
+        //
+        // Se cambia de centro sólo por una costura la mitad más larga que la que
+        // manda, y no por cualquiera que lo sea un poco: cada centro nuevo cuesta una
+        // pasada por la imagen, y en un dibujo con ruido las costuras cortas de un
+        // mismo sombreado ajustan círculos que se parecen y no aportan nada.
+        let (mut radial_ahora, mut largo_ahora) = (radial.clone(), largo);
+        for &m in &group {
+            let Some(seam) = seams.get(&(m.min(candidate), m.max(candidate))) else {
+                continue;
+            };
+            if seam.points.len() * 2 <= largo_ahora * 3 {
+                continue;
+            }
+            if let Some(c) = circle(&seam.points, limit) {
+                largo_ahora = seam.points.len();
+                radial_ahora = Some(Model::Radial {
+                    c,
+                    reach: reaches.get(c),
+                });
+            }
+        }
         group.push(candidate);
-        match Fit::of(&group, bands).filter(|fit| fit.earns_it(&group, bands, tolerance)) {
+        match Fit::best_of(&group, bands, radial_ahora.as_ref(), tolerance) {
             Some(fit) => {
                 best = Some(fit);
+                (radial, largo) = (radial_ahora, largo_ahora);
                 push(&mut queue, &mut seen, candidate);
             }
             None => {
@@ -477,7 +540,7 @@ fn grow(
     // le abre a una pareja, y la abre una propiedad de la imagen y no del ajuste, que
     // es lo que impide que se cuele cualquier par de vecinas. Ver [`crate::softness`].
     let por_colores = fit.stops.len() >= MIN_COLORS;
-    let por_blandura = group.len() >= 2 && todas_blandas(&group, soft_pairs);
+    let por_blandura = group.len() >= 2 && alguna_blanda(&group, neighbours, seams);
     (por_colores || por_blandura).then_some((group, fit))
 }
 
@@ -490,54 +553,313 @@ fn grow(
 /// embadurnado en una dirección que no existe. Ese error concreto ya se cometió una
 /// vez —dos caras estiradas a lo largo de una diagonal inventada, en la sesión del
 /// 4c—, así que aquí el modelo es parte del ajuste y no una suposición.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone)]
 enum Model {
     /// Proyección sobre una dirección unitaria.
     Linear { u: (f64, f64) },
-    /// Distancia a un centro.
-    Radial { c: (f64, f64) },
+    /// Distancia a un centro, con las alturas de cada banda ya medidas **sobre los
+    /// píxeles** para ese centro. Ver [`Reach`].
+    Radial { c: (f64, f64), reach: Rc<Reach> },
 }
 
 impl Model {
-    /// La altura del degradado en un punto.
-    fn at(&self, p: (f64, f64)) -> f64 {
-        match *self {
-            Model::Linear { u } => u.0 * p.0 + u.1 * p.1,
-            Model::Radial { c } => ((p.0 - c.0).powi(2) + (p.1 - c.1).powi(2)).sqrt(),
+    /// A qué altura está la masa de una banda, que es donde va su parada.
+    ///
+    /// Es la altura **media sobre los píxeles**, y no la altura del centroide, que
+    /// es lo que parece lo mismo y no lo es: para una distancia las dos cuentas se
+    /// separan tanto como quiera la forma de la banda, y en el peor caso —una banda
+    /// en anillo— el centroide es el centro y su altura sale cero, o sea la parada
+    /// del color de dentro puesta encima de la del de fuera. Con el eje sí son la
+    /// misma cosa, porque una proyección es lineal.
+    ///
+    /// Ese error concreto ya se cometió: los degradados radiales salían con las dos
+    /// paradas pegadas y el error de todas las bandas al máximo, así que un disco
+    /// sombreado desde dentro se rechazaba entero.
+    fn height(&self, id: RegionId, bands: &[Band]) -> f64 {
+        match self {
+            Model::Linear { u } => {
+                let (cx, cy) = bands[id].centroid();
+                u.0 * cx + u.1 * cy
+            }
+            Model::Radial { reach, .. } => reach.of(id).2,
+        }
+    }
+
+    /// El recorrido de alturas que cubre una banda: entre qué dos valores se mueve
+    /// el degradado dentro de ella.
+    ///
+    /// Con el eje es una **cota** superior, sacada del octógono de la banda, y
+    /// siempre de más: una cota holgada rechaza rampas legítimas, que es el lado
+    /// seguro, mientras que una corta aceptaría grupos que el degradado no
+    /// reproduce.
+    ///
+    /// Con la distancia a un centro no vale ninguna cota convexa, y por eso el
+    /// recorrido radial se mide exacto. Las bandas de un degradado radial son
+    /// **anillos**, y cualquier convexo que contenga un anillo contiene su centro:
+    /// el mínimo sale 0 en vez del radio interior, el degradado se evalúa en el
+    /// color del centro y el error de todos los anillos se dispara. Con la caja
+    /// alineada —el primer intento— un disco sombreado desde un punto de dentro
+    /// salía a cero degradados.
+    fn extent(&self, id: RegionId, bands: &[Band]) -> (f64, f64) {
+        match self {
+            Model::Linear { u } => bands[id].span(*u),
+            Model::Radial { reach, .. } => {
+                let (lo, hi, _) = reach.of(id);
+                (lo, hi)
+            }
         }
     }
 }
 
-/// Las parejas de regiones cuya frontera compartida es blanda.
+/// Los píxeles de cada banda, agrupados por banda.
+///
+/// Sirve para poder recorrer **una** banda sin recorrer la imagen, que es lo que
+/// hace asequible medir alturas radiales exactas: un grupo con costura blanda son
+/// dos o tres bandas de un dibujo con cuatrocientas, y medir sobre la imagen entera
+/// costaba una pasada completa por centro —46 pasadas en el aerógrafo y 33 en la
+/// portada, o 20 y 40 ms de los 130 y 90 que cuesta la conversión.
+///
+/// Se construye una sola vez y sólo si hace falta: en un cartel de color plano no
+/// llega a construirse.
+struct Pixels {
+    /// Índices de píxel ordenados por banda.
+    index: Vec<u32>,
+    /// Dónde empieza cada banda dentro de `index`.
+    offsets: Vec<usize>,
+    width: usize,
+}
+
+impl Pixels {
+    fn new(labels: &[u32], bands: usize, width: usize) -> Pixels {
+        let mut offsets = vec![0usize; bands + 1];
+        for &label in labels {
+            if label != NONE && (label as usize) < bands {
+                offsets[label as usize + 1] += 1;
+            }
+        }
+        for i in 0..bands {
+            offsets[i + 1] += offsets[i];
+        }
+        let mut at = offsets.clone();
+        let mut index = vec![0u32; offsets[bands]];
+        for (i, &label) in labels.iter().enumerate() {
+            if label != NONE && (label as usize) < bands {
+                index[at[label as usize]] = i as u32;
+                at[label as usize] += 1;
+            }
+        }
+        Pixels {
+            index,
+            offsets,
+            width,
+        }
+    }
+
+    fn of(&self, id: RegionId) -> &[u32] {
+        &self.index[self.offsets[id]..self.offsets[id + 1]]
+    }
+}
+
+/// Las alturas de las bandas para un centro radial, medidas sobre los píxeles.
+///
+/// Aquí no hay atajo por momentos como con el eje: la distancia a un punto no es
+/// lineal, así que ni el recorrido ni la media salen de la posición media de la
+/// banda, y las dos cosas hacen falta exactas. Ver [`Model::height`] y
+/// [`Model::extent`].
+///
+/// Cada banda se mide la primera vez que se pregunta por ella, no todas de golpe: un
+/// grupo pregunta por las suyas y por las de las candidatas que prueba, que son unas
+/// pocas de todas las del dibujo.
+struct Reach {
+    c: (f64, f64),
+    pixels: Rc<Pixels>,
+    /// Por banda: recorrido y altura media. En una celda mutable porque se rellena al
+    /// preguntar, y se pregunta desde un ajuste que no se considera mutable —lo que
+    /// cambia es la caché, no la respuesta.
+    heights: RefCell<HashMap<RegionId, (f64, f64, f64)>>,
+}
+
+impl Reach {
+    /// El recorrido y la altura media de una banda: `(min, max, media)`.
+    fn of(&self, id: RegionId) -> (f64, f64, f64) {
+        if let Some(&hit) = self.heights.borrow().get(&id) {
+            return hit;
+        }
+        let (mut lo, mut hi, mut sum) = (f64::INFINITY, f64::NEG_INFINITY, 0.0);
+        let px = self.pixels.of(id);
+        for &i in px {
+            let i = i as usize;
+            let (x, y) = (
+                (i % self.pixels.width) as f64,
+                (i / self.pixels.width) as f64,
+            );
+            let d = (x - self.c.0).hypot(y - self.c.1);
+            lo = lo.min(d);
+            hi = hi.max(d);
+            sum += d;
+        }
+        // Una banda sin un solo píxel no existe, pero el tipo no lo impide y dividir
+        // por su área sí que rompería.
+        let out = if px.is_empty() {
+            (0.0, 0.0, 0.0)
+        } else {
+            (lo, hi, sum / px.len() as f64)
+        };
+        self.heights.borrow_mut().insert(id, out);
+        out
+    }
+}
+
+/// Las alturas radiales ya medidas, por centro.
+///
+/// Los centros son pocos —uno por grupo con costura blanda, y repetidos entre grupos
+/// vecinos, que la caché junta—, y aun así conviene no repetirlos: lo que se guarda
+/// aquí es lo ya medido para cada uno.
+struct Reaches<'a> {
+    labels: &'a [u32],
+    bands: usize,
+    width: usize,
+    pixels: Option<Rc<Pixels>>,
+    /// Por centro redondeado al píxel: dos centros que caen en el mismo píxel dan las
+    /// mismas alturas con la precisión que esto necesita.
+    cache: HashMap<(i64, i64), Rc<Reach>>,
+}
+
+impl<'a> Reaches<'a> {
+    fn new(labels: &'a [u32], bands: usize, width: usize) -> Self {
+        Reaches {
+            labels,
+            bands,
+            width,
+            pixels: None,
+            cache: HashMap::new(),
+        }
+    }
+
+    fn get(&mut self, c: (f64, f64)) -> Rc<Reach> {
+        let key = (c.0.round() as i64, c.1.round() as i64);
+        if let Some(hit) = self.cache.get(&key) {
+            return hit.clone();
+        }
+        let labels = self.labels;
+        let (bands, width) = (self.bands, self.width);
+        let pixels = self
+            .pixels
+            .get_or_insert_with(|| Rc::new(Pixels::new(labels, bands, width)))
+            .clone();
+        let reach = Rc::new(Reach {
+            c,
+            pixels,
+            heights: RefCell::new(HashMap::new()),
+        });
+        self.cache.insert(key, reach.clone());
+        reach
+    }
+}
+
+/// Lo que se sabe de la costura blanda entre dos regiones.
 ///
 /// Una pareja y no una arista porque dos regiones pueden compartir varios tramos, y
 /// lo que decide es el conjunto: basta que alguno sea blando para que la costura lo
 /// sea, porque una transición difuminada que en un trozo se estreche sigue siendo la
 /// misma transición.
-fn soft_pairs(regions: &Regions, soft: &[bool]) -> HashSet<(RegionId, RegionId)> {
-    let mut out = HashSet::new();
+struct Seam {
+    /// Puntos de la costura, para el ajuste de círculo. Se guardan y no se ajusta
+    /// aquí porque sólo hace falta el círculo de las costuras que acaban dentro de
+    /// un grupo, que son muchas menos.
+    points: Vec<(i32, i32)>,
+}
+
+/// Las costuras blandas, por pareja de regiones.
+fn soft_seams(regions: &Regions, soft: &[bool]) -> HashMap<(RegionId, RegionId), Seam> {
+    let mut out: HashMap<(RegionId, RegionId), Seam> = HashMap::new();
     for (id, edge) in regions.edges.iter().enumerate() {
-        if soft.get(id).copied().unwrap_or(false) {
-            if let Some(right) = edge.right {
-                out.insert((edge.left.min(right), edge.left.max(right)));
-            }
+        if !soft.get(id).copied().unwrap_or(false) {
+            continue;
+        }
+        if let Some(right) = edge.right {
+            out.entry((edge.left.min(right), edge.left.max(right)))
+                .or_insert_with(|| Seam { points: Vec::new() })
+                .points
+                .extend_from_slice(&edge.points);
         }
     }
     out
 }
 
-/// Si todas las costuras **internas** del grupo son blandas.
+/// El centro del círculo que mejor pasa por unos puntos, o nada si no hay círculo
+/// que valga.
+///
+/// Es de dónde sale el centro de un degradado radial, y no de los colores: la línea
+/// de nivel de un degradado radial **es** un círculo, así que la costura entre dos de
+/// sus bandas es un arco y ajustarlo da el centro directamente. Sacarlo del centroide
+/// del color más claro del grupo —que fue el primer intento— falla en cuanto el grupo
+/// no llega al centro: el centroide de un arco está en el arco, no en el centro de
+/// curvatura.
+///
+/// El ajuste es el algebraico: con `x² + y² = ax + by + c` la incógnita entra lineal
+/// y sale de un sistema de 3x3. Es sensible al ruido cuando el arco es corto, y da
+/// igual, porque quien decide si el modelo sirve es el error de después, que se mide
+/// exacto.
+fn circle(points: &[(i32, i32)], limit: f64) -> Option<(f64, f64)> {
+    if points.len() < 8 {
+        return None;
+    }
+    // Centrado en la media para que el sistema no dependa de dónde esté el dibujo.
+    let n = points.len() as f64;
+    let (mx, my) = points.iter().fold((0.0, 0.0), |acc, p| {
+        (acc.0 + f64::from(p.0) / n, acc.1 + f64::from(p.1) / n)
+    });
+    let (mut sxx, mut sxy, mut syy, mut sxz, mut syz) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for p in points {
+        let (x, y) = (f64::from(p.0) - mx, f64::from(p.1) - my);
+        let z = x * x + y * y;
+        sxx += x * x;
+        sxy += x * y;
+        syy += y * y;
+        sxz += x * z;
+        syz += y * z;
+    }
+    let det = sxx * syy - sxy * sxy;
+    // Puntos en línea recta: no hay centro de curvatura que estimar, y una costura
+    // recta ya la explica el eje.
+    if !det.is_finite() || det.abs() <= 1e-9 * sxx.max(syy).max(1.0).powi(2) {
+        return None;
+    }
+    let (a, b) = (
+        (sxz * syy - syz * sxy) / (2.0 * det),
+        (syz * sxx - sxz * sxy) / (2.0 * det),
+    );
+    // Un centro que se va del lienzo por una tangente casi recta describe un
+    // degradado lineal, que ya está entre los candidatos y sale más barato.
+    (a.hypot(b) <= limit).then_some((a + mx, b + my))
+}
+
+/// Si alguna costura **interna** del grupo es blanda.
 ///
 /// Se pregunta por las internas y no por el contorno: lo que el degradado va a
 /// borrar son las fronteras de dentro, y el borde de fuera se queda como esté.
-fn todas_blandas(group: &[RegionId], soft_pairs: &HashSet<(RegionId, RegionId)>) -> bool {
+///
+/// Y basta **una**, que es lo que parece flojo y no lo es. Se probó a pedirlas todas,
+/// razonando que ésta es la única puerta para un grupo que no llega a [`MIN_COLORS`]
+/// colores y que con una sola costura difuminada se colaría un damero de dos entradas
+/// en una zona de ruido. Medido, lo que se cuela no es ruido: pedirlas todas deja el
+/// aerógrafo con los mismos 21 degradados repartidos en **15 bandas más** —una
+/// transición que en un trozo se estreche hasta parecer canto sigue siendo la misma
+/// transición— y le quita dos a la portada, sin que se vea nada mejor en ninguna de
+/// las dos. Del ruido no protege esto, sino [`Fit::earns_it`] y [`BOOTSTRAP`].
+fn alguna_blanda(
+    group: &[RegionId],
+    neighbours: &[Vec<RegionId>],
+    seams: &HashMap<(RegionId, RegionId), Seam>,
+) -> bool {
+    let member: HashSet<RegionId> = group.iter().copied().collect();
     let mut alguna = false;
-    for (i, &a) in group.iter().enumerate() {
-        for &b in &group[i + 1..] {
-            let par = (a.min(b), a.max(b));
-            // Sólo cuentan las parejas que de verdad se tocan; dos bandas del grupo
-            // que no comparten frontera no dicen nada.
-            if soft_pairs.contains(&par) {
+    for &a in group {
+        // Sólo cuentan las parejas que de verdad se tocan; dos bandas del grupo que
+        // no comparten frontera no dicen nada de ninguna transición.
+        for &b in neighbours[a].iter().filter(|b| member.contains(b)) {
+            if seams.contains_key(&(a.min(b), a.max(b))) {
                 alguna = true;
             }
         }
@@ -566,43 +888,59 @@ struct Stop {
 }
 
 impl Fit {
-    /// Ajusta el modelo lineal, que es con el que se hace crecer un grupo.
-    fn of(group: &[RegionId], bands: &[Band]) -> Option<Fit> {
-        Fit::with(Model::Linear { u: axis(group, bands)? }, group, bands)
-    }
-
-    /// El mejor de los modelos candidatos para un grupo ya cerrado: el eje que
-    /// salió de hacerlo crecer y los centros radiales que su geometría sugiere.
+    /// El mejor de los modelos candidatos para un grupo: el eje por mínimos
+    /// cuadrados y, si `radial`, los centros que su geometría sugiere.
     ///
-    /// Se elige **al final** y no en cada paso del crecimiento por coste: el ajuste
-    /// se rehace en cada candidata que se prueba, y multiplicarlo por el número de
-    /// modelos multiplicaría la etapa entera. El precio es que el grupo lo forma el
-    /// modelo lineal, así que una rampa curva de muchas bandas puede dejar de crecer
-    /// antes de que le llegue el turno al radial. La barriga de un dibujo son dos
-    /// bandas y no le pasa; un degradado radial de ocho, puede.
-    fn best(group: &[RegionId], bands: &[Band], linear: Fit) -> Fit {
-        let mut best = (linear.error(group, bands), linear);
-        for c in centers(group, bands) {
-            if let Some(fit) = Fit::with(Model::Radial { c }, group, bands) {
-                let error = fit.error(group, bands);
-                if error < best.0 {
-                    best = (error, fit);
-                }
+    /// «Mejor» es el que menos se equivoca en la banda que peor le sale, que es la
+    /// magnitud con la que luego se decide si el grupo vale ([`Fit::earns_it`]), así
+    /// que elegir aquí el de menor error y filtrar después es lo mismo que preguntar
+    /// si **algún** modelo aguanta el grupo.
+    ///
+    /// Se elige en cada paso del crecimiento y no al final, que fue el primer
+    /// intento y no vale: el grupo lo forma el modelo con el que se prueba cada
+    /// candidata, así que con el eje solo una costura curvada se rechaza —el
+    /// recorrido de una banda curva sobre un eje es larguísimo y el error se
+    /// dispara— y al radial no le llega el turno nunca. Medido: un disco sombreado
+    /// desde un punto de dentro salía a **cero** degradados eligiendo al final.
+    ///
+    /// Lo que acota el coste de probar dos modelos en vez de uno es la puerta: el
+    /// radial llega ya construido y sólo lo construye una costura blanda que se
+    /// curva, que es donde puede haber un sombreado redondo. En un cartel de color
+    /// plano no se prueba nunca.
+    fn best_of(
+        group: &[RegionId],
+        bands: &[Band],
+        radial: Option<&Model>,
+        tolerance: f64,
+    ) -> Option<Fit> {
+        // Primero quién aguanta el grupo y sólo después quién lo explica mejor, y en
+        // ese orden: al revés —elegir el mejor y luego comprobarlo— la preferencia
+        // por el eje tira grupos que el centro sí sostiene. Medido en el aerógrafo:
+        // los mismos 21 degradados repartidos en 15 bandas menos.
+        let medir = |fit: Fit| {
+            fit.earns_it(group, bands, tolerance)
+                .then(|| (fit.error(group, bands), fit))
+        };
+        let linear =
+            axis(group, bands).and_then(|u| medir(Fit::with(Model::Linear { u }, group, bands)));
+        let radial = radial.and_then(|model| medir(Fit::with(model.clone(), group, bands)));
+        match (linear, radial) {
+            (Some((recto, fit)), Some((curvo, redondo))) => {
+                Some(if curvo < recto * PREFER { redondo } else { fit })
             }
+            (uno, otro) => uno.or(otro).map(|(_, fit)| fit),
         }
-        best.1
     }
 
     /// Coloca una parada por color sobre el modelo dado.
-    fn with(model: Model, group: &[RegionId], bands: &[Band]) -> Option<Fit> {
+    fn with(model: Model, group: &[RegionId], bands: &[Band]) -> Fit {
         // Una parada por **color**, en el centro de todo lo que ese color pinta.
         // Por banda sería una parada por dato, y entonces no hay ajuste que pueda
         // fallar: el degradado acertaría cada banda en su centro por construcción,
         // y una mota es corta sobre cualquier eje. Ver el porqué arriba.
         let mut sum: Vec<(Rgba, f64, f64)> = Vec::new();
         for &id in group {
-            let (cx, cy) = bands[id].centroid();
-            let (w, t) = (bands[id].moments.n, model.at((cx, cy)));
+            let (w, t) = (bands[id].moments.n, model.height(id, bands));
             match sum.iter_mut().find(|(c, _, _)| *c == bands[id].color) {
                 Some(entry) => {
                     entry.1 += w * t;
@@ -626,11 +964,11 @@ impl Fit {
                 reach = reach.max(a.lab.distance(&b.lab));
             }
         }
-        Some(Fit {
+        Fit {
             model,
             stops,
             reach,
-        })
+        }
     }
 
     /// El color del degradado a la altura `t` del eje, interpolando en sRGB, que
@@ -715,7 +1053,7 @@ impl Fit {
     /// afín, así que esos puntos acotan la desviación.
     fn band_error(&self, id: RegionId, bands: &[Band]) -> f64 {
         let band = &bands[id];
-        let (lo, hi) = band.extent(&self.model);
+        let (lo, hi) = self.model.extent(id, bands);
         let first = self.stops.partition_point(|s| s.at <= lo);
         // Una banda que sobre el modelo no ocupa nada —un píxel suelto, o una que
         // cae perpendicular al eje— no tiene ninguna parada dentro, y ahí el segundo
@@ -795,57 +1133,6 @@ fn axis(group: &[RegionId], bands: &[Band]) -> Option<(f64, f64)> {
         c += gy * gy;
     }
     dominant(a, b, c)
-}
-
-/// Centros candidatos para un degradado radial.
-///
-/// Un sombreado radial tiene su color extremo en el centro: el brillo de una
-/// superficie redonda está donde la luz cae de frente y el tono se apaga hacia
-/// fuera. Así que se prueban los centroides de los dos colores extremos del grupo
-/// —el más claro y el más oscuro sobre el recorrido de color— y el del grupo entero,
-/// que es el caso de una rampa centrada.
-///
-/// Son tres candidatos y no un ajuste: el centro entra no lineal en el modelo, y
-/// ajustarlo de verdad pide iterar. Tres tiros bastan para lo que hay que decidir,
-/// que es si el sombreado es radial **o** lineal, y de acertar el centro se encarga
-/// el que menos se equivoca.
-fn centers(group: &[RegionId], bands: &[Band]) -> Vec<(f64, f64)> {
-    // Los dos colores más separados del grupo, que son los extremos de la rampa.
-    let mut extremos: Option<(Rgba, Rgba)> = None;
-    let mut mayor = 0.0;
-    for (i, &a) in group.iter().enumerate() {
-        for &b in &group[i + 1..] {
-            let d = bands[a].lab.distance(&bands[b].lab);
-            if d > mayor {
-                mayor = d;
-                extremos = Some((bands[a].color, bands[b].color));
-            }
-        }
-    }
-    // El centroide de todo lo que pinta un color, no el de una banda suelta: un
-    // color puede estar repartido en varias.
-    let centroide = |quien: Option<Rgba>| {
-        let (mut cx, mut cy, mut n) = (0.0, 0.0, 0.0);
-        for &id in group {
-            if quien.is_some_and(|c| c != bands[id].color) {
-                continue;
-            }
-            let w = bands[id].moments.n;
-            let (bx, by) = bands[id].centroid();
-            cx += w * bx;
-            cy += w * by;
-            n += w;
-        }
-        (n > 0.0).then(|| (cx / n, cy / n))
-    };
-    let (a, b) = match extremos {
-        Some((a, b)) => (Some(a), Some(b)),
-        None => (None, None),
-    };
-    [centroide(a), centroide(b), centroide(None)]
-        .into_iter()
-        .flatten()
-        .collect()
 }
 
 /// Autovector dominante de la simétrica `[[a, b], [b, c]]`, normalizado.
@@ -932,7 +1219,7 @@ fn shape(regions: &Regions, group: &[RegionId], bands: &[Band], fit: &Fit) -> Ra
                 Box::new(move |t| (t - lo) / span),
             )
         }
-        Model::Radial { c } => {
+        Model::Radial { c, .. } => {
             let radius = hi.max(f64::EPSILON);
             (
                 Axis::Radial { center: c, radius },

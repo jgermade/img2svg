@@ -608,12 +608,7 @@ fn convert_cluster(
             &softness::measure(&regions, &clustering, img, options.tolerance),
             regions.edges.len(),
         );
-        ramp::merge(
-            &mut regions,
-            &clustering.labels,
-            options.tolerance,
-            &soft,
-        );
+        ramp::merge(&mut regions, &clustering.labels, options.tolerance, &soft);
     }
     progress.stage(Stage::Document);
 

@@ -374,6 +374,96 @@ larger than a gradient can reproduce. Turning it off on a 5 Mpx drawing goes fro
 costs more than the gradients save. Each wins in its own place and you cannot have
 both.
 
+**Soft seams, and the second gradient model** (`softness.rs`). The criterion above
+needs three palette colours before it calls a group a ramp, and the reason is
+sound: any two neighbouring regions can be split by some tendered gradient — the
+model lands halfway between them and each is off by half — and that is not a
+gradient, it is averaging, which is what `tolerance` already does.
+
+But the terminator of a round surface shaded with an airbrush is usually *two*
+tones, and it was coming out with a hard crescent across the middle of a volume —
+a belly, a muzzle. Two colours meeting is not enough to tell a shading from an
+edge; what tells them apart is what the original painted *between* them:
+
+> **Softness** is how many pixels a boundary takes to go from one face's colour to
+> the other's, counted along its normal.
+
+Measuring it needs no edge detector, and a generic one would in fact get it wrong.
+A detector looks at the image without knowing what each boundary separates, so all
+it can ask is *where colour changes* — and crossing a two-pixel stroke over skin
+the colour moves for six or eight pixels straight (skin, inside the stroke, outside
+the stroke), so a straight scan reports one wide transition where there are two
+hard edges back to back. Measured that way, an album cover — flat poster art with
+black linework — comes out soft on 58% of its boundaries, which is the opposite of
+the truth.
+
+Here it is well posed, because by this stage **both colours are already decided**:
+a boundary separates region `A` from region `B` and their palette entries are known
+before anything is measured. The question becomes *how many pixels along this
+normal are a mixture of these two particular colours*, which is the same projection
+`speckle` uses to tell a fringe from a stroke. Third time that projection has paid.
+
+The threshold came from looking at the distribution on three drawings that have
+nothing in common, weighted by boundary length:
+
+| softness | `Sonic1.png` | `cover.jpg` | a synthetic sky |
+| --- | --- | --- | --- |
+| 0–1 px | 28% | 19% | 34% |
+| 2–4 px | 20% | **72%** | 0% |
+| 5–8 px | 24% | 2% | 0% |
+| 9–16 px | 20% | 1% | **64%** |
+
+The poster is flat art and **91% of its boundaries stay under 5**, which is what
+has to happen. The sky is a pure ramp and saturates the measure's reach. The drawing
+with volume has both, with a valley right at 5: its ink edges measure 0 and 1, and
+the shading seams of the belly and the muzzle, 7 and 15. So `softness::SOFT = 5`
+working pixels — not "one pixel", which is what the criterion said before it was
+measured: an upscaled JPEG has no one-pixel edges and is still hard.
+
+A soft seam does two things. It lets a **pair** be a ramp, which is the only way
+past the three-colour rule and one opened by a property of the image rather than of
+the fit. And it is the gate to the **radial** model: a gradient is colour as a
+function of a height, and the height can be the projection onto an axis or the
+distance to a centre. A cliff of light on a wall is the first; the terminator of a
+sphere is the second, and forcing it through an axis smears it along a direction the
+drawing does not have.
+
+Which model wins is decided by the error of each, with ties going to the axis
+(`ramp::PREFER`) — a `<linearGradient>` is what an editor and a human expect of
+tendered shading, and a seam with a 300-pixel radius of curvature is explained just
+as well by both. The centre of a radial comes from the **curvature of the seam** and
+not from the colours: the level set of a radial gradient is a circle, so the seam
+between two of its bands is an arc, and an algebraic circle fit gives the centre
+directly. Taking it from the centroid of the group's lightest colour — the first
+attempt — fails as soon as the group does not reach the centre, because the centroid
+of an arc sits on the arc.
+
+Two things about that model have to be exact, and both were wrong first:
+
+- **The extent of a band** cannot be bounded from outside. The bands of a radial
+  gradient are annuli, and any convex hull of an annulus contains its centre, so
+  the minimum comes out 0 instead of the inner radius, the gradient is evaluated at
+  the centre colour, and every band's error explodes. With the bounding box, a disc
+  shaded from a point inside it produced **zero** gradients.
+- **A stop goes at the mean height over the pixels**, not at the height of the
+  centroid. For a distance the two differ as much as the shape wants: for a full
+  annulus the centroid *is* the centre, so the inner colour's stop lands on top of
+  the outer one's. For an axis they are the same thing, because a projection is
+  linear.
+
+Both mean measuring over pixels, one pass per centre — and that has to be paid for
+carefully. Measuring whole images cost 46 passes on the airbrush drawing and 33 on
+the cover, or 20 and 40 ms of the 130 and 90 the conversions take. Grouping the
+pixels by band once and measuring a band the first time it is asked about brings it
+back to nothing: a group with a soft seam is two or three bands out of four hundred.
+On flat artwork the index is never even built.
+
+What it buys, measured on the airbrush drawing: the belly and the muzzle fall off
+smoothly instead of breaking at a crescent, and the document goes from 137 paths and
+34.6 KB to **95 and 30.3 KB**. The synthetic sky still comes out as one *linear*
+gradient, and the cover keeps its four flat faces — the model choice does not
+over-fire.
+
 **Background removal.** `remove_background` empties the flat background and crops
 to what is left, as the pixel-art path already did. On a label image it needs no
 flood fill: the regions *are* connected blocks of one colour, so "what comes in

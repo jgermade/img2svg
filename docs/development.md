@@ -134,6 +134,7 @@ It runs in CI, right after the wasm build.
 | `tests/golden.rs` | Snapshots of the pixel art path over a synthetic ASCII sprite. Input lives in the file, so it runs anywhere. |
 | `tests/resample.rs` | The working scale: that one number decides the working canvas whatever the file size, that upscaling is capped, that a flat colour survives the filter unchanged, that a cut-out's edge does not darken (premultiplied alpha), and that the document is still announced at the source's size. |
 | `tests/wobble.rs` | Contour filing: that it costs fewer numbers, that a right angle stays exactly where it was, and that no vertex moves further than the cap — without which this would be a smoothing. |
+| `tests/softness.rs` | The softness measure: that a hard edge measures zero, that a transition measures its width, and that **the same pair of colours** can come out hard in one place and soft in another — which is what makes it a property of the boundary rather than of the colours. |
 | `tests/illustration.rs` | Snapshots of the illustration path over a synthetic drawing — a gradient, two flat blocks, a one-pixel line and a few loose dots, one motif per behaviour that was decided by looking at results. |
 | `tests/corpus.rs` | Snapshots over the real images in `examples/`. |
 
