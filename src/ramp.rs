@@ -94,7 +94,7 @@ use std::collections::HashSet;
 
 use crate::cluster::NONE;
 use crate::color::{Oklab, Rgba};
-use crate::region::{EdgeId, Ramp, RegionId, Regions};
+use crate::region::{Axis, EdgeId, Ramp, RegionId, Regions};
 
 /// Cuánto puede apartarse el degradado del color plano de una banda, en múltiplos
 /// de `tolerance`.
@@ -218,6 +218,31 @@ impl Band {
         )
     }
 
+    /// Hasta dónde llega la banda sobre el modelo: el recorrido de alturas que
+    /// cubre, acotado por fuera.
+    ///
+    /// Acotado y no exacto, y siempre de más: una cota holgada rechaza rampas
+    /// legítimas, que es el lado seguro, mientras que una corta aceptaría grupos que
+    /// el degradado no reproduce.
+    fn extent(&self, model: &Model) -> (f64, f64) {
+        match *model {
+            Model::Linear { u } => self.span(u),
+            // Para la distancia a un centro basta la caja alineada, que está
+            // guardada exacta: las direcciones 0 y DIRS/2 son los dos ejes. El
+            // mínimo es cero si el centro cae dentro, y el máximo, la esquina más
+            // lejana.
+            Model::Radial { c } => {
+                let (x0, x1) = (f64::from(self.lo[0]), f64::from(self.hi[0]));
+                let (y0, y1) = (f64::from(self.lo[DIRS / 2]), f64::from(self.hi[DIRS / 2]));
+                let dx = (x0 - c.0).max(c.0 - x1).max(0.0);
+                let dy = (y0 - c.1).max(c.1 - y1).max(0.0);
+                let far = (x0 - c.0).abs().max((x1 - c.0).abs());
+                let up = (y0 - c.1).abs().max((y1 - c.1).abs());
+                ((dx * dx + dy * dy).sqrt(), (far * far + up * up).sqrt())
+            }
+        }
+    }
+
     /// Hasta dónde llega la banda sobre el eje `u`, acotado por las dos
     /// direcciones guardadas que lo abrazan.
     ///
@@ -259,12 +284,13 @@ fn dirs() -> [(f32, f32); DIRS] {
 /// Trabaja sobre `regions` ya construido y sobre las etiquetas del clustering,
 /// que es de donde salen los momentos. Las regiones que se lleva un degradado
 /// desaparecen de `regions.regions`.
-pub fn merge(regions: &mut Regions, labels: &[u32], tolerance: f64) {
+pub fn merge(regions: &mut Regions, labels: &[u32], tolerance: f64, soft: &[bool]) {
     if tolerance <= 0.0 || regions.regions.is_empty() {
         return;
     }
     let bands = bands(regions, labels);
     let neighbours = neighbours(regions);
+    let soft_pairs = soft_pairs(regions, soft);
 
     // De la región más grande a la más pequeña: una rampa se reconoce por sus
     // bandas anchas, y empezar por una mota daría un eje sacado de nada.
@@ -283,7 +309,9 @@ pub fn merge(regions: &mut Regions, labels: &[u32], tolerance: f64) {
         if taken[seed] {
             continue;
         }
-        if let Some((group, fit)) = grow(seed, &bands, &neighbours, &taken, tolerance) {
+        if let Some((group, fit)) =
+            grow(seed, &bands, &neighbours, &soft_pairs, &taken, tolerance)
+        {
             for &id in &group {
                 taken[id] = true;
             }
@@ -296,9 +324,13 @@ pub fn merge(regions: &mut Regions, labels: &[u32], tolerance: f64) {
 
     // Las figuras se arman con `regions.edges` todavía intacto, así que hasta
     // aquí no se toca nada de lo que dependen.
+    // El modelo se elige aquí, con el grupo ya cerrado: ver [`Fit::best`].
     regions.ramps = found
-        .iter()
-        .map(|(group, fit)| shape(regions, group, &bands, fit))
+        .into_iter()
+        .map(|(group, fit)| {
+            let fit = Fit::best(&group, &bands, fit);
+            shape(regions, &group, &bands, &fit)
+        })
         .collect();
     regions.regions = std::mem::take(&mut regions.regions)
         .into_iter()
@@ -389,6 +421,7 @@ fn grow(
     seed: RegionId,
     bands: &[Band],
     neighbours: &[Vec<RegionId>],
+    soft_pairs: &HashSet<(RegionId, RegionId)>,
     taken: &[bool],
     tolerance: f64,
 ) -> Option<(Vec<RegionId>, Fit)> {
@@ -433,15 +466,89 @@ fn grow(
     }
 
     let fit = best?;
-    // El número de paradas **es** el de colores distintos del grupo: hay una por
-    // color. Ver [`Fit::of`].
-    (fit.stops.len() >= MIN_COLORS).then_some((group, fit))
+    // Dos caminos para entrar, y hace falta uno de los dos.
+    //
+    // Por **colores**: el número de paradas es el de colores distintos del grupo
+    // —hay una por color— y con tres el modelo tiene que acertar un orden además de
+    // un valor, que es lo que distingue una rampa de un promedio.
+    //
+    // O por **blandura**: dos bandas cuya costura el original pintó difuminada son
+    // una transición, lo diga el recuento de colores o no. Es la única puerta que se
+    // le abre a una pareja, y la abre una propiedad de la imagen y no del ajuste, que
+    // es lo que impide que se cuele cualquier par de vecinas. Ver [`crate::softness`].
+    let por_colores = fit.stops.len() >= MIN_COLORS;
+    let por_blandura = group.len() >= 2 && todas_blandas(&group, soft_pairs);
+    (por_colores || por_blandura).then_some((group, fit))
 }
 
-/// El degradado ajustado a un grupo: un eje y una parada por banda.
+/// Cómo se pasa de una posición a la altura del degradado.
+///
+/// Son dos porque hay dos clases de sombreado y una no cabe en la otra. Un
+/// `<linearGradient>` expresa el color como función de la proyección sobre un eje,
+/// que es lo que es un cielo o una pared iluminada; el terminador de una superficie
+/// redonda es función de la **distancia a un centro**, y con un eje sale
+/// embadurnado en una dirección que no existe. Ese error concreto ya se cometió una
+/// vez —dos caras estiradas a lo largo de una diagonal inventada, en la sesión del
+/// 4c—, así que aquí el modelo es parte del ajuste y no una suposición.
+#[derive(Clone, Copy, Debug)]
+enum Model {
+    /// Proyección sobre una dirección unitaria.
+    Linear { u: (f64, f64) },
+    /// Distancia a un centro.
+    Radial { c: (f64, f64) },
+}
+
+impl Model {
+    /// La altura del degradado en un punto.
+    fn at(&self, p: (f64, f64)) -> f64 {
+        match *self {
+            Model::Linear { u } => u.0 * p.0 + u.1 * p.1,
+            Model::Radial { c } => ((p.0 - c.0).powi(2) + (p.1 - c.1).powi(2)).sqrt(),
+        }
+    }
+}
+
+/// Las parejas de regiones cuya frontera compartida es blanda.
+///
+/// Una pareja y no una arista porque dos regiones pueden compartir varios tramos, y
+/// lo que decide es el conjunto: basta que alguno sea blando para que la costura lo
+/// sea, porque una transición difuminada que en un trozo se estreche sigue siendo la
+/// misma transición.
+fn soft_pairs(regions: &Regions, soft: &[bool]) -> HashSet<(RegionId, RegionId)> {
+    let mut out = HashSet::new();
+    for (id, edge) in regions.edges.iter().enumerate() {
+        if soft.get(id).copied().unwrap_or(false) {
+            if let Some(right) = edge.right {
+                out.insert((edge.left.min(right), edge.left.max(right)));
+            }
+        }
+    }
+    out
+}
+
+/// Si todas las costuras **internas** del grupo son blandas.
+///
+/// Se pregunta por las internas y no por el contorno: lo que el degradado va a
+/// borrar son las fronteras de dentro, y el borde de fuera se queda como esté.
+fn todas_blandas(group: &[RegionId], soft_pairs: &HashSet<(RegionId, RegionId)>) -> bool {
+    let mut alguna = false;
+    for (i, &a) in group.iter().enumerate() {
+        for &b in &group[i + 1..] {
+            let par = (a.min(b), a.max(b));
+            // Sólo cuentan las parejas que de verdad se tocan; dos bandas del grupo
+            // que no comparten frontera no dicen nada.
+            if soft_pairs.contains(&par) {
+                alguna = true;
+            }
+        }
+    }
+    alguna
+}
+
+/// El degradado ajustado a un grupo: un modelo y una parada por color.
 struct Fit {
-    /// Dirección unitaria del eje.
-    u: (f64, f64),
+    /// De posición a altura.
+    model: Model,
     /// Paradas ordenadas por su posición sobre el eje: una por color, con el color
     /// ya en Oklab porque se pregunta muchas veces y la conversión lleva raíces
     /// cúbicas.
@@ -459,72 +566,35 @@ struct Stop {
 }
 
 impl Fit {
-    /// Ajusta el eje por mínimos cuadrados y coloca una parada por color.
-    ///
-    /// El eje sale de la regresión de Oklab sobre `(x, y)`, ponderada por área:
-    /// da una matriz de `3x2` cuyo mayor vector singular por la derecha es la
-    /// dirección en la que más cambia el color. Para `2x2` sale en cerrado.
+    /// Ajusta el modelo lineal, que es con el que se hace crecer un grupo.
     fn of(group: &[RegionId], bands: &[Band]) -> Option<Fit> {
-        let mut total = Moments::default();
-        for &id in group {
-            total.add(&bands[id].moments);
-        }
-        let n = total.n;
-        let (mx, my) = (total.x / n, total.y / n);
-        // Covarianza de la posición, sobre los píxeles.
-        let (cxx, cxy, cyy) = (
-            total.xx / n - mx * mx,
-            total.xy / n - mx * my,
-            total.yy / n - my * my,
-        );
-        let det = cxx * cyy - cxy * cxy;
-        if !det.is_finite() || det <= 1e-9 * cxx * cyy {
-            // Todas las bandas en una recta o en un punto: no hay dos direcciones
-            // que distinguir y el eje no está determinado.
-            return None;
-        }
+        Fit::with(Model::Linear { u: axis(group, bands)? }, group, bands)
+    }
 
-        // Covarianza entre color y posición, con el color pesado por área.
-        let mut cov = [(0.0, 0.0); 3];
-        let mut mean = (0.0, 0.0, 0.0);
-        for &id in group {
-            let w = bands[id].moments.n / n;
-            let lab = bands[id].lab;
-            mean.0 += w * f64::from(lab.l);
-            mean.1 += w * f64::from(lab.a);
-            mean.2 += w * f64::from(lab.b);
-        }
-        for &id in group {
-            let w = bands[id].moments.n / n;
-            let (cx, cy) = bands[id].centroid();
-            let lab = bands[id].lab;
-            let d = [
-                f64::from(lab.l) - mean.0,
-                f64::from(lab.a) - mean.1,
-                f64::from(lab.b) - mean.2,
-            ];
-            for (c, dc) in cov.iter_mut().zip(d) {
-                c.0 += w * dc * (cx - mx);
-                c.1 += w * dc * (cy - my);
+    /// El mejor de los modelos candidatos para un grupo ya cerrado: el eje que
+    /// salió de hacerlo crecer y los centros radiales que su geometría sugiere.
+    ///
+    /// Se elige **al final** y no en cada paso del crecimiento por coste: el ajuste
+    /// se rehace en cada candidata que se prueba, y multiplicarlo por el número de
+    /// modelos multiplicaría la etapa entera. El precio es que el grupo lo forma el
+    /// modelo lineal, así que una rampa curva de muchas bandas puede dejar de crecer
+    /// antes de que le llegue el turno al radial. La barriga de un dibujo son dos
+    /// bandas y no le pasa; un degradado radial de ocho, puede.
+    fn best(group: &[RegionId], bands: &[Band], linear: Fit) -> Fit {
+        let mut best = (linear.error(group, bands), linear);
+        for c in centers(group, bands) {
+            if let Some(fit) = Fit::with(Model::Radial { c }, group, bands) {
+                let error = fit.error(group, bands);
+                if error < best.0 {
+                    best = (error, fit);
+                }
             }
         }
+        best.1
+    }
 
-        // Gradiente de cada canal: la covarianza por la inversa de la de posición.
-        let inv = (cyy / det, -cxy / det, cxx / det);
-        let g: Vec<(f64, f64)> = cov
-            .iter()
-            .map(|c| (c.0 * inv.0 + c.1 * inv.1, c.0 * inv.1 + c.1 * inv.2))
-            .collect();
-
-        // Dirección dominante: mayor autovector de la suma de `g·gᵀ`.
-        let (mut a, mut b, mut c) = (0.0, 0.0, 0.0);
-        for &(gx, gy) in &g {
-            a += gx * gx;
-            b += gx * gy;
-            c += gy * gy;
-        }
-        let u = dominant(a, b, c)?;
-
+    /// Coloca una parada por color sobre el modelo dado.
+    fn with(model: Model, group: &[RegionId], bands: &[Band]) -> Option<Fit> {
         // Una parada por **color**, en el centro de todo lo que ese color pinta.
         // Por banda sería una parada por dato, y entonces no hay ajuste que pueda
         // fallar: el degradado acertaría cada banda en su centro por construcción,
@@ -532,7 +602,7 @@ impl Fit {
         let mut sum: Vec<(Rgba, f64, f64)> = Vec::new();
         for &id in group {
             let (cx, cy) = bands[id].centroid();
-            let (w, t) = (bands[id].moments.n, u.0 * cx + u.1 * cy);
+            let (w, t) = (bands[id].moments.n, model.at((cx, cy)));
             match sum.iter_mut().find(|(c, _, _)| *c == bands[id].color) {
                 Some(entry) => {
                     entry.1 += w * t;
@@ -556,7 +626,11 @@ impl Fit {
                 reach = reach.max(a.lab.distance(&b.lab));
             }
         }
-        Some(Fit { u, stops, reach })
+        Some(Fit {
+            model,
+            stops,
+            reach,
+        })
     }
 
     /// El color del degradado a la altura `t` del eje, interpolando en sRGB, que
@@ -615,21 +689,163 @@ impl Fit {
         };
         // Por el final: la que se acaba de proponer es la que suele fallar, y
         // mirarla primero corta el resto.
-        group.iter().rev().all(|&id| {
-            let band = &bands[id];
-            let (lo, hi) = band.span(self.u);
-            let first = self.stops.partition_point(|s| s.at <= lo);
-            // Una banda que sobre el eje no ocupa nada —un píxel suelto, o una
-            // que cae perpendicular— no tiene ninguna parada dentro, y ahí el
-            // segundo corte se queda por detrás del primero.
-            let last = self.stops.partition_point(|s| s.at < hi).max(first);
-            let inner = self.stops[first..last].iter().map(|s| s.at);
-            [lo, hi]
-                .into_iter()
-                .chain(inner)
-                .all(|t| self.at(t).distance(&band.lab) <= ceiling)
-        })
+        group
+            .iter()
+            .rev()
+            .all(|&id| self.band_error(id, bands) <= ceiling)
     }
+
+    /// Lo peor que se equivoca el degradado en todo el grupo.
+    ///
+    /// Es lo que compara dos modelos entre sí, y por eso no puede cortar por lo
+    /// sano como hace [`Fit::earns_it`]: ahí basta saber si pasa de un techo, y aquí
+    /// hace falta el número.
+    fn error(&self, group: &[RegionId], bands: &[Band]) -> f64 {
+        group
+            .iter()
+            .map(|&id| self.band_error(id, bands))
+            .fold(0.0, f64::max)
+    }
+
+    /// Lo que se equivoca el degradado dentro de una banda.
+    ///
+    /// Se mira en los quiebros: los dos extremos del recorrido de la banda sobre el
+    /// modelo y las paradas que caigan dentro. Entre dos paradas el color va por un
+    /// segmento recto en sRGB, y sobre un escalón tan corto Oklab es prácticamente
+    /// afín, así que esos puntos acotan la desviación.
+    fn band_error(&self, id: RegionId, bands: &[Band]) -> f64 {
+        let band = &bands[id];
+        let (lo, hi) = band.extent(&self.model);
+        let first = self.stops.partition_point(|s| s.at <= lo);
+        // Una banda que sobre el modelo no ocupa nada —un píxel suelto, o una que
+        // cae perpendicular al eje— no tiene ninguna parada dentro, y ahí el segundo
+        // corte se queda por detrás del primero.
+        let last = self.stops.partition_point(|s| s.at < hi).max(first);
+        let inner = self.stops[first..last].iter().map(|s| s.at);
+        [lo, hi]
+            .into_iter()
+            .chain(inner)
+            .map(|t| self.at(t).distance(&band.lab))
+            .fold(0.0, f64::max)
+    }
+}
+
+/// El eje por mínimos cuadrados de un grupo.
+///
+/// Sale de la regresión de Oklab sobre `(x, y)`, ponderada por área: da una matriz
+/// de `3x2` cuyo mayor vector singular por la derecha es la dirección en la que más
+/// cambia el color. Para `2x2` sale en cerrado.
+fn axis(group: &[RegionId], bands: &[Band]) -> Option<(f64, f64)> {
+    let mut total = Moments::default();
+    for &id in group {
+        total.add(&bands[id].moments);
+    }
+    let n = total.n;
+    let (mx, my) = (total.x / n, total.y / n);
+    // Covarianza de la posición, sobre los píxeles.
+    let (cxx, cxy, cyy) = (
+        total.xx / n - mx * mx,
+        total.xy / n - mx * my,
+        total.yy / n - my * my,
+    );
+    let det = cxx * cyy - cxy * cxy;
+    if !det.is_finite() || det <= 1e-9 * cxx * cyy {
+        // Todas las bandas en una recta o en un punto: no hay dos direcciones que
+        // distinguir y el eje no está determinado.
+        return None;
+    }
+
+    // Covarianza entre color y posición, con el color pesado por área.
+    let mut cov = [(0.0, 0.0); 3];
+    let mut mean = (0.0, 0.0, 0.0);
+    for &id in group {
+        let w = bands[id].moments.n / n;
+        let lab = bands[id].lab;
+        mean.0 += w * f64::from(lab.l);
+        mean.1 += w * f64::from(lab.a);
+        mean.2 += w * f64::from(lab.b);
+    }
+    for &id in group {
+        let w = bands[id].moments.n / n;
+        let (cx, cy) = bands[id].centroid();
+        let lab = bands[id].lab;
+        let d = [
+            f64::from(lab.l) - mean.0,
+            f64::from(lab.a) - mean.1,
+            f64::from(lab.b) - mean.2,
+        ];
+        for (c, dc) in cov.iter_mut().zip(d) {
+            c.0 += w * dc * (cx - mx);
+            c.1 += w * dc * (cy - my);
+        }
+    }
+
+    // Gradiente de cada canal: la covarianza por la inversa de la de posición.
+    let inv = (cyy / det, -cxy / det, cxx / det);
+    let g: Vec<(f64, f64)> = cov
+        .iter()
+        .map(|c| (c.0 * inv.0 + c.1 * inv.1, c.0 * inv.1 + c.1 * inv.2))
+        .collect();
+
+    // Dirección dominante: mayor autovector de la suma de `g·gᵀ`.
+    let (mut a, mut b, mut c) = (0.0, 0.0, 0.0);
+    for &(gx, gy) in &g {
+        a += gx * gx;
+        b += gx * gy;
+        c += gy * gy;
+    }
+    dominant(a, b, c)
+}
+
+/// Centros candidatos para un degradado radial.
+///
+/// Un sombreado radial tiene su color extremo en el centro: el brillo de una
+/// superficie redonda está donde la luz cae de frente y el tono se apaga hacia
+/// fuera. Así que se prueban los centroides de los dos colores extremos del grupo
+/// —el más claro y el más oscuro sobre el recorrido de color— y el del grupo entero,
+/// que es el caso de una rampa centrada.
+///
+/// Son tres candidatos y no un ajuste: el centro entra no lineal en el modelo, y
+/// ajustarlo de verdad pide iterar. Tres tiros bastan para lo que hay que decidir,
+/// que es si el sombreado es radial **o** lineal, y de acertar el centro se encarga
+/// el que menos se equivoca.
+fn centers(group: &[RegionId], bands: &[Band]) -> Vec<(f64, f64)> {
+    // Los dos colores más separados del grupo, que son los extremos de la rampa.
+    let mut extremos: Option<(Rgba, Rgba)> = None;
+    let mut mayor = 0.0;
+    for (i, &a) in group.iter().enumerate() {
+        for &b in &group[i + 1..] {
+            let d = bands[a].lab.distance(&bands[b].lab);
+            if d > mayor {
+                mayor = d;
+                extremos = Some((bands[a].color, bands[b].color));
+            }
+        }
+    }
+    // El centroide de todo lo que pinta un color, no el de una banda suelta: un
+    // color puede estar repartido en varias.
+    let centroide = |quien: Option<Rgba>| {
+        let (mut cx, mut cy, mut n) = (0.0, 0.0, 0.0);
+        for &id in group {
+            if quien.is_some_and(|c| c != bands[id].color) {
+                continue;
+            }
+            let w = bands[id].moments.n;
+            let (bx, by) = bands[id].centroid();
+            cx += w * bx;
+            cy += w * by;
+            n += w;
+        }
+        (n > 0.0).then(|| (cx / n, cy / n))
+    };
+    let (a, b) = match extremos {
+        Some((a, b)) => (Some(a), Some(b)),
+        None => (None, None),
+    };
+    [centroide(a), centroide(b), centroide(None)]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// Autovector dominante de la simétrica `[[a, b], [b, c]]`, normalizado.
@@ -697,18 +913,41 @@ fn shape(regions: &Regions, group: &[RegionId], bands: &[Band], fit: &Fit) -> Ra
         n += w;
     }
     let (cx, cy) = (cx / n, cy / n);
-    let tc = fit.u.0 * cx + fit.u.1 * cy;
-    let at = |t: f64| (cx + fit.u.0 * (t - tc), cy + fit.u.1 * (t - tc));
-    let span = (hi - lo).max(f64::EPSILON);
+
+    // Cada modelo lleva sus paradas a `0..1` a su manera, y la diferencia no es
+    // cosmética: en un radial el cero **es** el centro, no la primera parada, así
+    // que el radio se mide desde ahí y la parada de dentro se queda donde le toca.
+    // Antes de la primera parada y después de la última, un degradado repite el
+    // color del extremo, que es exactamente lo que hay al otro lado.
+    let (axis, escala): (Axis, Box<dyn Fn(f64) -> f64>) = match fit.model {
+        Model::Linear { u } => {
+            let tc = u.0 * cx + u.1 * cy;
+            let at = |t: f64| (cx + u.0 * (t - tc), cy + u.1 * (t - tc));
+            let span = (hi - lo).max(f64::EPSILON);
+            (
+                Axis::Linear {
+                    from: at(lo),
+                    to: at(hi),
+                },
+                Box::new(move |t| (t - lo) / span),
+            )
+        }
+        Model::Radial { c } => {
+            let radius = hi.max(f64::EPSILON);
+            (
+                Axis::Radial { center: c, radius },
+                Box::new(move |t| t / radius),
+            )
+        }
+    };
 
     Ramp {
         rings: crate::boundary::rings(&regions.edges, &uses),
-        from: at(lo),
-        to: at(hi),
+        axis,
         stops: fit
             .stops
             .iter()
-            .map(|s| (((s.at - lo) / span).clamp(0.0, 1.0), s.color))
+            .map(|s| (escala(s.at).clamp(0.0, 1.0), s.color))
             .collect(),
         bands: group.len(),
     }

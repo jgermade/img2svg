@@ -38,6 +38,8 @@ pub mod segment;
 #[cfg(feature = "illustration")]
 pub mod smooth;
 #[cfg(feature = "illustration")]
+pub mod softness;
+#[cfg(feature = "illustration")]
 pub mod speckle;
 #[cfg(feature = "illustration")]
 pub mod subpixel;
@@ -534,6 +536,36 @@ fn convert_grid(
     })
 }
 
+/// La imagen a la escala a la que se va a segmentar, o la misma si no hay que
+/// reescalarla.
+///
+/// Existe como función porque tiene dos clientes: la conversión y la medida de
+/// blandura de [`softness`], que tiene que mirar exactamente los píxeles a los que
+/// se refiere la geometría.
+#[cfg(feature = "illustration")]
+fn working<'a>(img: &'a RgbaImage, options: &ClusterOptions) -> Cow<'a, RgbaImage> {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    let simplify = options.simplify.unwrap_or(resample::SIMPLIFY);
+    match resample::working_size(w, h, simplify) {
+        Some((tw, th)) => Cow::Owned(resample::resize(img, tw, th)),
+        None => Cow::Borrowed(img),
+    }
+}
+
+/// La blandura de cada frontera de una imagen: cuántos píxeles tarda en pasar de un
+/// color al otro. Ver [`softness`].
+///
+/// Es una medida y no una conversión: no escribe documento ninguno. Está aquí porque
+/// necesita el trozo de delante del proceso —escala de trabajo, paleta, regiones,
+/// fronteras— y ese trozo no debe estar escrito dos veces.
+#[cfg(feature = "illustration")]
+pub fn softness_of(img: &RgbaImage, options: &ClusterOptions) -> Vec<softness::Softness> {
+    let scaled = working(img, options);
+    let clustering = cluster::from_image(scaled.as_ref(), options);
+    let regions = boundary::from_clustering(&clustering);
+    softness::measure(&regions, &clustering, scaled.as_ref(), options.tolerance)
+}
+
 /// La otra segmentación: paleta y regiones conexas, sin rejilla ninguna.
 ///
 /// Son dos llamadas porque el trabajo está en [`cluster`] y [`boundary`]: aquí
@@ -550,12 +582,9 @@ fn convert_cluster(
     // La escala de trabajo va **primero**, antes de que nadie mire un píxel: todo
     // lo que viene después está en píxeles absolutos, y lo que esos píxeles miden
     // se decide aquí. Ver [`resample`].
-    let (sw, sh) = (img.width() as usize, img.height() as usize);
-    let simplify = options.simplify.unwrap_or(resample::SIMPLIFY);
-    let working = resample::working_size(sw, sh, simplify);
-    let scaled = working.map(|(tw, th)| resample::resize(img, tw, th));
-    let img = scaled.as_ref().unwrap_or(img);
-    let scale = img.width() as f64 / sw as f64;
+    let scaled = working(img, options);
+    let scale = scaled.width() as f64 / img.width() as f64;
+    let img = scaled.as_ref();
 
     let clustering = cluster::from_image_with(img, options, progress);
     progress.stage(Stage::Boundaries);
@@ -571,7 +600,20 @@ fn convert_cluster(
         // Con los tramos ya colocados, porque fundir un grupo sólo elige cuáles se
         // dibujan y no toca ninguno.
         progress.stage(Stage::Ramps);
-        ramp::merge(&mut regions, &clustering.labels, options.tolerance);
+        // La blandura de cada frontera se mide sobre la imagen a la escala de
+        // trabajo, que es la que la geometría describe, y sólo cuando hay
+        // degradados que buscar: es una pasada por los píxeles del borde y no se
+        // paga si nadie la va a leer.
+        let soft = softness::soft_edges(
+            &softness::measure(&regions, &clustering, img, options.tolerance),
+            regions.edges.len(),
+        );
+        ramp::merge(
+            &mut regions,
+            &clustering.labels,
+            options.tolerance,
+            &soft,
+        );
     }
     progress.stage(Stage::Document);
 

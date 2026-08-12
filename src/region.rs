@@ -95,13 +95,27 @@ pub struct Ramp {
     /// Contorno de la unión de las bandas, con sus agujeros, igual que en una
     /// región y con el mismo `fill-rule`.
     pub rings: Vec<Ring>,
-    /// Los dos extremos del eje del degradado, en coordenadas del lienzo.
-    pub from: (f64, f64),
-    pub to: (f64, f64),
+    /// Cómo se pasa de una posición del lienzo a la altura del degradado.
+    pub axis: Axis,
     /// Paradas en orden, cada una con su posición en `0..1` sobre ese eje.
     pub stops: Vec<(f64, Rgba)>,
     /// Bandas que sustituye. No hace falta para dibujar; se informa.
     pub bands: usize,
+}
+
+/// La geometría de un degradado: qué función de la posición es su altura.
+///
+/// Son dos y no una porque un `<linearGradient>` sólo sabe expresar el color como
+/// función de la proyección sobre **un eje**, y hay sombreados que no lo son: el
+/// terminador de una superficie redonda —la barriga de un dibujo, una esfera— es
+/// una función de la **distancia a un centro**, y forzarle un eje lo embadurna en
+/// una dirección que no existe. Cada una se emite con su elemento.
+#[derive(Clone, Copy, Debug)]
+pub enum Axis {
+    /// La altura es la proyección sobre la recta que va de `from` a `to`.
+    Linear { from: (f64, f64), to: (f64, f64) },
+    /// La altura es la distancia a `center`, partida por `radius`.
+    Radial { center: (f64, f64), radius: f64 },
 }
 
 /// Lo que devuelve la segmentación.

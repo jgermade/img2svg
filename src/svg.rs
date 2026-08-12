@@ -6,7 +6,7 @@
 //! dibujo.
 
 use crate::fit::{Fit, Fitted};
-use crate::region::Regions;
+use crate::region::{Axis, Regions};
 
 pub struct Options {
     /// Tamaño de render de cada píxel lógico. El `viewBox` va siempre en píxeles
@@ -67,14 +67,25 @@ pub fn render(regions: &Regions, opts: &Options) -> Output {
                 )
             })
             .collect();
-        defs.push_str(&format!(
-            "    <linearGradient id=\"r{i}\" gradientUnits=\"userSpaceOnUse\" \
+        // Cada geometría con su elemento: el degradado de una superficie redonda
+        // no es una función de la proyección sobre un eje y no cabe en el otro.
+        defs.push_str(&match ramp.axis {
+            Axis::Linear { from, to } => format!(
+                "    <linearGradient id=\"r{i}\" gradientUnits=\"userSpaceOnUse\" \
 x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">{stops}</linearGradient>\n",
-            trim_float(ramp.from.0),
-            trim_float(ramp.from.1),
-            trim_float(ramp.to.0),
-            trim_float(ramp.to.1),
-        ));
+                trim_float(from.0),
+                trim_float(from.1),
+                trim_float(to.0),
+                trim_float(to.1),
+            ),
+            Axis::Radial { center, radius } => format!(
+                "    <radialGradient id=\"r{i}\" gradientUnits=\"userSpaceOnUse\" \
+cx=\"{}\" cy=\"{}\" r=\"{}\">{stops}</radialGradient>\n",
+                trim_float(center.0),
+                trim_float(center.1),
+                trim_float(radius),
+            ),
+        });
         let d: String = ramp
             .rings
             .iter()

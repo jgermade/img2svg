@@ -145,7 +145,7 @@ pub fn filter(clustering: &mut Clustering, max_area: usize, min_thickness: f64, 
             }
             let second = sides[i][1].unwrap_or(first);
             match mixture(lab[i], lab[first as usize], lab[second as usize]) {
-                Some(gap) if gap <= MIX_CEILING * tolerance => {
+                Some(mix) if mix.gap <= MIX_CEILING * tolerance => {
                     // A la más parecida de las dos: fundir un reborde en la vecina
                     // de la que está más lejos en color sería meter el error entero
                     // teniendo la mitad al lado.
@@ -235,6 +235,16 @@ fn perimeters(c: &Clustering) -> Vec<usize> {
     out
 }
 
+/// Dónde cae un color respecto del segmento que une a otros dos.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Mix {
+    /// Distancia al segmento: cuánto le falta para ser una mezcla de los dos.
+    pub gap: f64,
+    /// Qué parte del camino lleva del primero al segundo, recortada a `0..1`. Cerca
+    /// de un extremo el color **es** ese extremo y no una mezcla de nada.
+    pub t: f64,
+}
+
 /// La distancia del color de una región al segmento que une a sus dos vecinas, o
 /// `None` si las tres son el mismo color y no hay nada que decidir.
 ///
@@ -247,7 +257,7 @@ fn perimeters(c: &Clustering) -> Vec<usize> {
 /// Con las dos vecinas iguales el segmento degenera en un punto y esto es la
 /// distancia a ese punto, que es exactamente lo que hay que preguntar de una línea
 /// fina dentro de una zona lisa.
-fn mixture(p: Oklab, a: Oklab, b: Oklab) -> Option<f64> {
+pub(crate) fn mixture(p: Oklab, a: Oklab, b: Oklab) -> Option<Mix> {
     let (ab, ap) = (
         [b.l - a.l, b.a - a.a, b.b - a.b],
         [p.l - a.l, p.a - a.a, p.b - a.b],
@@ -274,7 +284,10 @@ fn mixture(p: Oklab, a: Oklab, b: Oklab) -> Option<f64> {
     if (p.alpha - a.alpha).abs() > f32::EPSILON && (p.alpha - b.alpha).abs() > f32::EPSILON {
         return None;
     }
-    Some(d2.sqrt() as f64)
+    Some(Mix {
+        gap: d2.sqrt() as f64,
+        t: t as f64,
+    })
 }
 
 /// Para cada mota, las dos vecinas con las que comparte más frontera.

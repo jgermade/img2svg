@@ -247,6 +247,17 @@ struct Illustration {
     #[arg(long, conflicts_with = "relax")]
     no_relax: bool,
 
+    /// Mide la blandura de cada frontera y la imprime, sin escribir SVG.
+    ///
+    /// La blandura es cuántos píxeles tarda una frontera en pasar del color de una
+    /// cara al de la otra: un trazo de tinta cambia en uno, el terminador de una
+    /// superficie redonda pintada a aerógrafo tarda cinco o diez. Es la medida de
+    /// la que dependería decidir dónde poner un degradado y dónde dejar el borde
+    /// duro, y está aquí para poder mirar la distribución antes de escribir
+    /// ningún criterio.
+    #[arg(long)]
+    softness: bool,
+
     /// No fundir en un degradado los grupos de bandas que son una rampa.
     ///
     /// La paleta reparte una rampa continua en escalones, y las fronteras entre
@@ -418,6 +429,9 @@ fn run_pixelart(args: &Pixelart) -> Result<(), String> {
 
 fn run_illustration(args: &Illustration) -> Result<(), String> {
     let common = &args.common;
+    if args.softness {
+        return report_softness(args);
+    }
     let (out, path) = convert(common, &args.config())?;
     if common.quiet {
         return Ok(());
@@ -488,4 +502,69 @@ fn report_output(out: &Conversion, path: &std::path::Path) {
         path.display(),
         out.svg.len() as f64 / 1024.0
     );
+}
+
+/// Imprime la distribución de blandura de las fronteras de una imagen.
+///
+/// No escribe SVG: es un diagnóstico, y lo que hay que poder leer es si la
+/// distribución **separa** los bordes del sombreado. Se enseña pesada por longitud
+/// —una frontera de mil píxeles decide más que una de diez— y con las fronteras más
+/// largas por su nombre, que es lo que permite comprobar la medida contra el dibujo:
+/// las costuras de una barriga o un morro tienen que salir blandas y los bordes de
+/// tinta duros.
+fn report_softness(args: &Illustration) -> Result<(), String> {
+    let data = std::fs::read(&args.common.input)
+        .map_err(|e| format!("no se pudo leer {}: {e}", args.common.input.display()))?;
+    let img = image::load_from_memory(&data)
+        .map_err(|e| format!("no se pudo decodificar la imagen: {e}"))?
+        .to_rgba8();
+
+    let cluster = match args.config().segmentation {
+        img2svg::Segmentation::Cluster(options) => options,
+        _ => unreachable!("este subcomando siempre segmenta por clustering"),
+    };
+    let medidas = img2svg::softness_of(&img, &cluster);
+    if medidas.is_empty() {
+        eprintln!("ninguna frontera interior que medir");
+        return Ok(());
+    }
+
+    let total: usize = medidas.iter().map(|m| m.cracks).sum();
+    eprintln!(
+        "{} fronteras interiores, {total} píxeles de frontera",
+        medidas.len()
+    );
+    eprintln!("blandura  fronteras   píxeles de frontera");
+    let tope = medidas.iter().map(|m| m.width as usize).max().unwrap_or(0);
+    for ancho in 0..=tope {
+        let iguales: Vec<&img2svg::softness::Softness> = medidas
+            .iter()
+            .filter(|m| m.width as usize == ancho)
+            .collect();
+        if iguales.is_empty() {
+            continue;
+        }
+        let pixeles: usize = iguales.iter().map(|m| m.cracks).sum();
+        eprintln!(
+            "{ancho:>5} px  {:>6}      {:>6}  {:>3}%",
+            iguales.len(),
+            pixeles,
+            pixeles * 100 / total
+        );
+    }
+
+    let mut largas: Vec<&img2svg::softness::Softness> = medidas.iter().collect();
+    largas.sort_by_key(|m| std::cmp::Reverse(m.cracks));
+    eprintln!("\nlas fronteras más largas:");
+    for m in largas.iter().take(14) {
+        eprintln!(
+            "  {:>5} px  blandura {:>2}  salto {:.3}  {} | {}",
+            m.cracks,
+            m.width,
+            m.jump,
+            m.colors.0.to_hex(),
+            m.colors.1.to_hex()
+        );
+    }
+    Ok(())
 }
