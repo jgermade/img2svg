@@ -428,6 +428,50 @@ fn un_color_lejano_funda_entrada_por_raro_que_sea() {
 }
 
 #[test]
+fn el_atajo_puede_costar_luz_y_no_tono() {
+    // Los dos techos, contrastados con el mismo número: dos manchas a **la misma
+    // distancia** del plano —0,160, dentro de `SNAP_CEILING`— y de tres píxeles
+    // cada una, que es demasiado poco para ganarse entrada por recuento. Lo único
+    // que las distingue es en qué se gastan esos 0,160.
+    //
+    // Es el defecto de la portada reducido a dos colores: el canto de una letra
+    // blanca sobre el panel verde deja píxeles verdosos que no se ganan entrada, y
+    // sin este techo se los quedaba un tono de piel que les caía cerca en total.
+    // Doce píxeles de reborde ocre alrededor de cada letra, de un color que no está
+    // en la imagen.
+    let piel = Rgba::new(222, 189, 181, 255);
+    let mas_oscura = Rgba::new(171, 139, 132, 255); // el mismo tono, 0,160 de luz
+    let verde_claro = Rgba::new(138, 222, 138, 255); // el mismo brillo, 0,160 de tono
+
+    // Un lienzo mayor que el de los otros: el presupuesto va con los píxeles
+    // visibles, y tiene que dar de sobra para que tres píxeles se absorban.
+    let plano = |mancha: Rgba| {
+        let mut img = RgbaImage::from_pixel(96, 96, image::Rgba([piel.r, piel.g, piel.b, piel.a]));
+        for i in 0..3 {
+            img.put_pixel(i, 0, image::Rgba([mancha.r, mancha.g, mancha.b, mancha.a]));
+        }
+        img
+    };
+
+    // Las entradas llevan el color ya cuantizado, que es lo primero que hace la
+    // paleta, así que es contra ése contra el que hay que preguntar.
+    let options = solo_paleta();
+    let entrada = |c: Rgba| c.quantize(options.color_precision).to_hex();
+
+    let colores = colores_de(&plano(mas_oscura), &options);
+    assert!(
+        !colores.contains(&entrada(mas_oscura)),
+        "lo que sólo se aparta en luz se absorbe, que es para lo que está el atajo: {colores:?}"
+    );
+
+    let colores = colores_de(&plano(verde_claro), &options);
+    assert!(
+        colores.contains(&entrada(verde_claro)),
+        "lo que se aparta en tono funda entrada aunque esté igual de cerca: {colores:?}"
+    );
+}
+
+#[test]
 fn un_degradado_se_reparte_en_bandas() {
     // Un vector no tiene degradado por región, así que una rampa suave tiene que
     // volverse escalones. Lo que no puede pasar es que salga una sola región de

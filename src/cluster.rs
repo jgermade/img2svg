@@ -42,7 +42,7 @@
 //!
 //! | etapa | qué puede empeorar el color de un píxel |
 //! | --- | --- |
-//! | `min_color_share` | hasta [`SNAP_CEILING`] veces la tolerancia |
+//! | `min_color_share` | hasta [`SNAP_CEILING`] veces la tolerancia, y de ellas [`SNAP_HUE`] en tono |
 //! | `gradient_step` | lo que diga, y sólo a lo largo del eje de la luz |
 //! | [`crate::smooth`] | hasta [`crate::smooth::CEILING`] veces la tolerancia, o hasta donde ya estuviera; y sólo a un color que ya se pintaba pegado a él |
 //! | [`crate::speckle`] | sin cota: una mota se va con su vecina, sea del color que sea |
@@ -50,9 +50,11 @@
 //! `min_color_share` y el suavizado componen sin aflojarse: `4x` sigue siendo la
 //! cota con los dos puestos, porque el suavizado nunca empeora un píxel más allá
 //! de donde ya estaba. Así que **con los valores por defecto ningún píxel se pinta
-//! a más de `SNAP_CEILING * tolerance` de su color en tono**, más lo que
-//! `gradient_step` permita **en luz**, que es un eje aparte y por eso se dice
-//! aparte. Apagando las cuatro —`min_color_share: 0`, `smoothing: 0`,
+//! a más de `SNAP_CEILING * tolerance` de su color, ni a más de `SNAP_HUE *
+//! tolerance` de él en tono**, más lo que `gradient_step` permita **en luz**, que es
+//! un eje aparte y por eso se dice aparte. Las dos cotas del arrastre hacen falta
+//! porque una sola sobre la distancia total deja pasar un cambio de color entero:
+//! ver [`SNAP_HUE`], que es un defecto medido y no una precaución. Apagando las cuatro —`min_color_share: 0`, `smoothing: 0`,
 //! `filter_speckle: 0`, `min_thickness: 0`, `gradient_step: 0`— vale la cota
 //! estrecha tal cual está escrita arriba. `tests/cluster.rs` comprueba las dos.
 //!
@@ -111,6 +113,28 @@ pub const NONE: u32 = u32::MAX;
 /// que se puede escribir: **ningún píxel se pinta a más de `4 * tolerance` de su
 /// color**.
 pub const SNAP_CEILING: f64 = 4.0;
+
+/// Y cuánto puede empeorar **de tono**, en múltiplos de `tolerance`.
+///
+/// El techo de arriba mira la distancia entera, y por eso deja pasar un cambio de
+/// tono: la entrada más cercana a un color puede estar cerca por la luz y ser de otro
+/// color. Medido en la portada de un disco, es de donde sale su defecto más visible.
+/// El canto de una letra blanca sobre el panel verde es una rampa de seis píxeles
+/// —doce a la escala de trabajo— cuyos píxeles de en medio son mezcla limpia de sus
+/// dos lados; ninguno se gana entrada propia, y el más cercano a `(186,209,183)` no
+/// es un verde claro, que no está en la paleta, sino un tono de piel a 1,4
+/// tolerancias. Así que la rampa entera se pinta de beige y el rótulo sale con un
+/// reborde ocre que no está en la imagen.
+///
+/// Una tolerancia, que es lo que la paleta promete de por sí: absorber puede costar
+/// luz —hasta [`SNAP_CEILING`]— y no puede costar tono. Lo que el atajo tenía que
+/// tragarse sigue tragándose, porque el *ringing* alrededor de un trazo negro
+/// comparte tono con el negro que lo absorbe; lo que deja de poder es cambiar de
+/// color.
+///
+/// Es lo simétrico de `gradient_step`, que da holgura en luz a propósito y ninguna en
+/// tono. Las dos salen de tener los dos ejes separados, que es para lo que está Oklab.
+pub const SNAP_HUE: f64 = 2.0;
 
 /// Opciones de la segmentación por clustering.
 ///
@@ -620,18 +644,22 @@ impl Palette {
             let can_add = !fixed && (options.max_colors == 0 || entries.len() < options.max_colors);
             // Dos mínimos, y hacen falta los dos por separado. `serviria` es la
             // más cercana **de las que le valen**, que es a la que se asigna; y
-            // `cercana` es la más cercana sin más, que es contra la que se mide si
-            // merece la pena fundar una entrada. No se puede sacar la segunda de
-            // la primera ni al revés: con `gradient_step` la entrada más cercana
-            // puede no valer mientras que otra un poco más lejos sí.
+            // `absorbe` es la más cercana **de las que pueden tragárselo** si no se
+            // gana entrada propia. No se puede sacar la segunda de la primera ni al
+            // revés: con `gradient_step` la entrada más cercana puede no valer
+            // mientras que otra un poco más lejos sí.
             let mut serviria: Option<(usize, f64)> = None;
-            let mut cercana: Option<(usize, f64)> = None;
+            let mut absorbe: Option<(usize, f64)> = None;
             for (i, &(_, entry_lab)) in entries.iter().enumerate() {
                 let d = lab.distance(&entry_lab);
                 // Estrictamente menor: a igualdad se queda la primera, que es la
-                // que fundó antes y por tanto la del color más presente.
-                if cercana.is_none_or(|(_, best)| d < best) {
-                    cercana = Some((i, d));
+                // que fundó antes y por tanto la del color más presente. Y sólo se
+                // mira a las que le quedan cerca en tono: el atajo puede empeorar la
+                // luz de un color, no cambiarle el color. Ver [`SNAP_HUE`].
+                if lab.chroma_distance(&entry_lab) <= SNAP_HUE * options.tolerance
+                    && absorbe.is_none_or(|(_, best)| d < best)
+                {
+                    absorbe = Some((i, d));
                 }
                 // Dentro de la tolerancia, o sólo más lejos en luz de lo que
                 // `gradient_step` permite ensanchar la banda.
@@ -648,10 +676,10 @@ impl Palette {
                 Some((i, _)) => i,
                 // Ninguna entrada le vale. Aquí `can_add` es siempre cierto: con
                 // la paleta llena el filtro de arriba deja pasar todo. Así que o
-                // se gana una entrada nueva, o se va con la más cercana aunque
-                // quede lejos —que es lo que hace que la paleta deje de crecer
-                // con el ruido de los bordes.
-                None => match cercana {
+                // se gana una entrada nueva, o se va con la más cercana de su tono
+                // aunque quede lejos —que es lo que hace que la paleta deje de
+                // crecer con el ruido de los bordes.
+                None => match absorbe {
                     Some((i, d))
                         if d <= options.tolerance * SNAP_CEILING && (count as f64) * d < budget =>
                     {

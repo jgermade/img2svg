@@ -84,12 +84,14 @@ and does not depend on where the sweep started.
 
 That bound belongs to the palette with everything else off, and the stages that
 **merge** are the ones that spend it, each at a stated price: `min_color_share`
-up to `cluster::SNAP_CEILING` × the tolerance; regularisation up to
+up to `cluster::SNAP_CEILING` × the tolerance, and of that at most
+`cluster::SNAP_HUE` × it in hue; regularisation up to
 `smooth::CEILING` × it or as far as the pixel already was, and only towards a
 colour already painted next to it; speck filtering with no bound at all, since a
 speck leaves with whatever neighbour it merges into. The first two compose
 without loosening — 4× stays 4× with both on — so **at the defaults no pixel is
-painted further than `SNAP_CEILING × tolerance` from its colour**. Turn all of
+painted further than `SNAP_CEILING × tolerance` from its colour, nor further than
+`SNAP_HUE × tolerance` from it in hue**. Turn all of
 them off and the narrow guarantee reads exactly as written above.
 `tests/cluster.rs` checks both.
 
@@ -120,6 +122,39 @@ measured in palette entries:
 | 3× | 20 | 24 |
 | **4×** | **20** | **21** |
 | none | 20 | 18 |
+
+One ceiling on the total distance is not enough, and the missing half is
+`SNAP_HUE`: a colour absorbed 4× away can be 4× away *in hue*, which means being
+painted a different colour rather than a worse shade of the same one. Measured on
+the album cover, that was its most visible defect. The edge of a white letter over
+the green panel is a six-pixel ramp — twelve at the working scale, since that image
+is upscaled ×2 — whose middle pixels are clean mixtures of the two sides; none of
+them earns an entry, and the nearest entry to `(186,209,183)` is not a pale green,
+which the palette does not have, but a **skin tone** 1.4 tolerances away. So the
+whole ramp was painted beige and every letter came out with an ochre fringe that is
+not in the image, along with blue flecks in dark hair from the same mechanism.
+
+So absorbing can cost lightness — up to `SNAP_CEILING` — and cannot cost hue, past
+`SNAP_HUE` × the tolerance. What the shortcut existed to swallow still gets
+swallowed, because ringing around a black stroke shares its hue with the black that
+absorbs it. It is the mirror of `gradient_step`, which grants slack in lightness on
+purpose and none in hue; both come from having the two axes apart, which is what
+Oklab is for.
+
+| hue ceiling | cover.jpg | Sonic1.png |
+| --- | --- | --- |
+| 1× | 30 colours, 461 paths, 94.1 KB | 25, 104, 30.9 KB |
+| 1.5× | 23, 441, 91.5 KB | 20, 92, 30.2 KB |
+| **2×** | **18, 438, 84.5 KB** | **20, 95, 30.0 KB** |
+| 3× | 16, 440, 84.3 KB | 20, 98, 31.0 KB |
+| none | 16, 440, 84.3 KB | 19, 95, 30.3 KB |
+
+At 3× the fringe is back, so the ceiling has to bite; at 1× it bites into colours
+that are doing work. At **2×** the fringe and the flecks are gone for two palette
+entries and 0.2 KB — the two entries being exactly the pale green and the dark olive
+that the ramps needed. The synthetic sky, which is a hue ramp from blue to olive and
+therefore the case most exposed to this, comes out with the same stops and the same
+geometry.
 
 Entries against the share, over three images with nothing in common — a JPEG
 illustration drawn in strokes, a 5 Mpx scanned airbrush, and an upscaled sprite:

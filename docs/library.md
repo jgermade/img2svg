@@ -89,7 +89,7 @@ for why each one exists.
 | `filter_speckle: usize` | `9` | Area up to which a region merges into a neighbour. `0` merges nothing. It is `resample::FEATURE²`: the area of the smallest feature the working scale promises to keep. |
 | `min_thickness: f64` | `3.0` | Thickness (`2 × area / perimeter`) below which a region **may** merge into a neighbour — it does only if its colour is a mixture of its two main neighbours, which is what tells an antialiasing fringe from an ink stroke of the same width. |
 | `gradient_step: f64` | `0.05` | How much *lightness* difference is merged past the tolerance. A little is on by default for split ink — a thin stroke never reaches full ink, so the palette splits one stroke into two tones. Raising it widens gradient bands and flattens shading. |
-| `min_color_share: f64` | `0.002` | What a colour has to be worth, as a fraction of the image, to get an entry of its own. `0` gives one to anybody. Loosens the tolerance guarantee to `cluster::SNAP_CEILING` × it. |
+| `min_color_share: f64` | `0.002` | What a colour has to be worth, as a fraction of the image, to get an entry of its own. `0` gives one to anybody. Loosens the tolerance guarantee to `cluster::SNAP_CEILING` × it, of which at most `cluster::SNAP_HUE` × it in hue — absorbing can cost lightness, never colour. |
 | `max_colors: usize` | `0` | Cap on palette entries. `0` is no cap. Drops the tolerance guarantee. |
 | `palette: Vec<Rgba>` | empty | An imposed palette. Non-empty means exactly this palette, nothing added. |
 | `remove_background: bool` | `false` | Clear the flat background and crop. |
